@@ -3,9 +3,11 @@ import type {
   CategoryDTO,
   CategoryKind,
   CategoryRef,
+  CategoryRuleDTO,
   ImportBatchDTO,
   ImportStatus,
   ReviewStatus,
+  RuleMatchField,
   TransactionDTO,
   TransactionType,
 } from '@spendscope/shared';
@@ -73,11 +75,13 @@ export interface TransactionRow {
   importBatchId: string | null;
   fingerprint: string | null;
   isSample: boolean;
+  refundOfTransactionId: string | null;
+  transferGroupId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export function toTransactionDTO(row: TransactionRow): TransactionDTO {
+export function toTransactionDTO(row: TransactionRow, extras: { refundedAmount?: Decimal } = {}): TransactionDTO {
   return {
     id: row.id,
     transactionDate: utcDateToDateOnly(row.transactionDate),
@@ -92,6 +96,9 @@ export function toTransactionDTO(row: TransactionRow): TransactionDTO {
     importBatchId: row.importBatchId,
     fingerprint: row.fingerprint,
     isSample: row.isSample,
+    refundOfTransactionId: row.refundOfTransactionId,
+    transferGroupId: row.transferGroupId,
+    ...(extras.refundedAmount ? { refundedAmount: decimalToString(extras.refundedAmount) } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -114,6 +121,32 @@ export function toBudgetDTO(row: BudgetRow): BudgetDTO {
     amount: decimalToString(row.amount),
     categoryId: row.categoryId,
     category: row.category ? toCategoryRef(row.category) : null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export interface CategoryRuleRow {
+  id: string;
+  matchField: RuleMatchField;
+  pattern: string;
+  categoryId: string;
+  priority: number;
+  isActive: boolean;
+  category?: { id: string; name: string; kind: CategoryKind; color: string | null } | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export function toCategoryRuleDTO(row: CategoryRuleRow): CategoryRuleDTO {
+  return {
+    id: row.id,
+    matchField: row.matchField,
+    pattern: row.pattern,
+    categoryId: row.categoryId,
+    category: row.category ? toCategoryRef(row.category) : null,
+    priority: row.priority,
+    isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

@@ -19,9 +19,10 @@ import {
 
 import { env } from '../../config/env.ts';
 import { BadRequestError, NotFoundError } from '../../lib/errors.ts';
+import { buildFingerprint, normalizeMerchant } from '../../lib/fingerprint.ts';
+import { loadActiveRules, firstMatch, type LoadedRule } from '../../lib/category-rules.ts';
 import { cleanHeader, parseCsv, toCsv, type Delimiter } from '../../lib/csv.ts';
 import { dateOnlyToUtcDate, utcDateToDateOnly } from '../../lib/dates.ts';
-import { buildFingerprint, normalizeMerchant } from '../../lib/fingerprint.ts';
 import { buildRecords, buildCandidateRows, summarizeCandidates, kindForType, type CandidateRow, type ExistingTransactionIndex, type RawCsvRecord } from '../../lib/import-parse.ts';
 import { detectMapping } from '../../lib/import-detect.ts';
 import { prisma } from '../../lib/prisma.ts';
@@ -121,6 +122,7 @@ async function buildExistingIndex(
 async function loadCategoryIndex(workspaceId: string): Promise<{
   byNameAndKind: Map<string, string>;
   kindById: Map<string, CategoryKind>;
+  nameById: Map<string, string>;
   ids: Set<string>;
 }> {
   const categories = await prisma.category.findMany({
@@ -129,33 +131,54 @@ async function loadCategoryIndex(workspaceId: string): Promise<{
   });
   const byNameAndKind = new Map<string, string>();
   const kindById = new Map<string, CategoryKind>();
+  const nameById = new Map<string, string>();
   const ids = new Set<string>();
   for (const category of categories) {
     byNameAndKind.set(`${category.name.toLowerCase()}|${category.kind}`, category.id);
     kindById.set(category.id, category.kind);
+    nameById.set(category.id, category.name);
     ids.add(category.id);
   }
-  return { byNameAndKind, kindById, ids };
+  return { byNameAndKind, kindById, nameById, ids };
 }
 
+/**
+ * Resolves the category a CSV row should receive.
+ *
+ * Precedence: the category named in the file, then the one detected from its
+ * description/amount, then the first matching category rule. A rule is only a
+ * fallback — it never replaces a category that the file already provides.
+ */
 function resolveCategoryId(
   candidate: CandidateRow,
   categories: { byNameAndKind: Map<string, string> },
+  rules: readonly LoadedRule[] = [],
 ): string | null {
   if (!candidate.type) return null;
   const kind: CategoryKind = kindForType(candidate.type);
   const name = candidate.categoryName ?? candidate.suggestedCategoryName;
-  if (!name) return null;
-  return categories.byNameAndKind.get(`${name.toLowerCase()}|${kind}`) ?? null;
+  if (name) {
+    const fromFile = categories.byNameAndKind.get(`${name.toLowerCase()}|${kind}`);
+    if (fromFile) return fromFile;
+  }
+  return (
+    firstMatch(rules, {
+      description: candidate.description,
+      merchant: candidate.merchant,
+      type: candidate.type,
+    })?.categoryId ?? null
+  );
 }
 
 function toPreviewRowDTO(
   candidate: CandidateRow,
-  categories: { byNameAndKind: Map<string, string> },
+  categories: { byNameAndKind: Map<string, string>; nameById: Map<string, string> },
+  rules: readonly LoadedRule[] = [],
 ): ImportPreviewRowDTO {
-  const suggestedCategoryId = resolveCategoryId(candidate, categories);
+  const suggestedCategoryId = resolveCategoryId(candidate, categories, rules);
   const kind: CategoryKind | null = candidate.type ? kindForType(candidate.type) : null;
   const suggestedName =
+    (suggestedCategoryId ? categories.nameById.get(suggestedCategoryId) : null) ??
     candidate.categoryName ??
     (kind ? (candidate.suggestedCategoryName ?? null) : null) ??
     null;
@@ -338,6 +361,7 @@ export async function previewImport(
   });
 
   const categories = await loadCategoryIndex(workspaceId);
+  const rules = await loadActiveRules(workspaceId);
   const summary: ImportSummaryDTO = summarizeCandidates(candidates);
 
   const stored = importPreviewStore.create({
@@ -359,7 +383,7 @@ export async function previewImport(
     detection: detectionDTO,
     mapping: effectiveMapping,
     summary,
-    rows: candidates.slice(0, PREVIEW_ROWS_RETURNED).map((candidate) => toPreviewRowDTO(candidate, categories)),
+    rows: candidates.slice(0, PREVIEW_ROWS_RETURNED).map((candidate) => toPreviewRowDTO(candidate, categories, rules)),
     rowsTruncated: candidates.length > PREVIEW_ROWS_RETURNED,
     expiresAt: new Date(stored.expiresAt).toISOString(),
     warnings,
@@ -403,6 +427,7 @@ export async function commitImport(
 ): Promise<ImportCommitResultDTO> {
   const { candidates, filename } = await rebuildCandidatesForPreview(workspaceId, input.previewId);
   const categories = await loadCategoryIndex(workspaceId);
+  const rules = await loadActiveRules(workspaceId);
 
   const overrides = new Map<number, string | null>();
   for (const override of input.categoryOverrides) {
@@ -444,7 +469,7 @@ export async function commitImport(
       if (!candidate.transactionDate || !candidate.amount || !candidate.type) return null;
       const categoryId = overrides.has(candidate.rowIndex)
         ? (overrides.get(candidate.rowIndex) ?? null)
-        : resolveCategoryId(candidate, categories);
+        : resolveCategoryId(candidate, categories, rules);
 
       if (categoryId) {
         const kind = kindForType(candidate.type);

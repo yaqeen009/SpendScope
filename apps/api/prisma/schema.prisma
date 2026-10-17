@@ -42,6 +42,41 @@ enum ImportStatus {
   FAILED
 }
 
+/// Which free-text field a category rule looks at.
+enum RuleMatchField {
+  /// Match the transaction description only.
+  DESCRIPTION
+  /// Match the merchant only.
+  MERCHANT
+  /// Match either field.
+  ANY
+}
+
+/// A user-defined rule that assigns a category to otherwise-uncategorised rows.
+///
+/// Rules never overwrite a category that already exists: they only fill in a
+/// missing one. Ordering is fully deterministic (see
+/// `apps/api/src/lib/category-rules.ts`), so applying the same rules to the same
+/// data always produces the same result.
+model CategoryRule {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @db.Uuid
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  matchField  RuleMatchField
+  /// Case-insensitive substring to look for. Stored trimmed and lower-cased.
+  pattern     String
+  categoryId  String         @db.Uuid
+  category    Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  /// Lower number = higher precedence.
+  priority    Int            @default(100)
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([workspaceId, matchField, pattern])
+  @@index([workspaceId, priority])
+}
+
 /// An account. Authentication is required for every API operation except
 /// register/login/health; a user owns one or more workspaces.
 model User {
@@ -93,6 +128,7 @@ model Workspace {
   budgets       Budget[]
   importBatches ImportBatch[]
   settings      Settings?
+  categoryRules CategoryRule[]
 
   @@index([ownerUserId])
 }
@@ -111,6 +147,7 @@ model Category {
   updatedAt    DateTime     @updatedAt
   transactions Transaction[]
   budgets      Budget[]
+  categoryRules CategoryRule[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId, kind])
@@ -134,6 +171,14 @@ model Transaction {
   reviewStatus       ReviewStatus    @default(NEEDS_REVIEW)
   importBatchId      String?         @db.Uuid
   importBatch        ImportBatch?    @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  /// Explicit link from a REFUND row to the EXPENSE it reverses. The refund
+  /// inherits the original's category so net-spend analytics stay correct.
+  refundOfTransactionId String?     @db.Uuid
+  refundOf              Transaction? @relation("TransactionRefunds", fields: [refundOfTransactionId], references: [id], onDelete: SetNull)
+  refunds               Transaction[] @relation("TransactionRefunds")
+  /// Both sides of a manually paired account transfer share this id.
+  /// Transfers are excluded from income/expense totals either way.
+  transferGroupId    String?         @db.Uuid
   /// Deterministic hash of date + normalised description + amount + type + merchant.
   fingerprint        String?
   /// True when the row was produced by the demo seed rather than a real import.
@@ -148,6 +193,8 @@ model Transaction {
   @@index([workspaceId, fingerprint])
   @@index([workspaceId, amount])
   @@index([importBatchId])
+  @@index([refundOfTransactionId])
+  @@index([transferGroupId])
 }
 
 model Budget {

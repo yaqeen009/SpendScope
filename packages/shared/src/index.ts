@@ -8,6 +8,7 @@ export * from './schemas/common.ts';
 export * from './schemas/auth.ts';
 export * from './schemas/transaction.ts';
 export * from './schemas/category.ts';
+export * from './schemas/category-rule.ts';
 export * from './schemas/budget.ts';
 export * from './schemas/import.ts';
 export * from './schemas/settings.ts';

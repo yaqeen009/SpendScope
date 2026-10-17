@@ -16,6 +16,11 @@ import type {
 } from './schemas/auth.ts';
 import type { BudgetQuery, CreateBudgetInput, UpdateBudgetInput } from './schemas/budget.ts';
 import type { CreateCategoryInput, UpdateCategoryInput } from './schemas/category.ts';
+import type {
+  ApplyCategoryRulesInput,
+  CreateCategoryRuleInput,
+  UpdateCategoryRuleInput,
+} from './schemas/category-rule.ts';
 import type { ColumnMapping } from './schemas/import.ts';
 import type { UpdateSettingsInput } from './schemas/settings.ts';
 import type {
@@ -26,6 +31,7 @@ import type {
   CategoryKind,
   ImportStatus,
   ReviewStatus,
+  RuleMatchField,
   TransactionType,
 } from './enums.ts';
 import type { DateRange, Granularity, PeriodKey } from './periods.ts';
@@ -33,12 +39,14 @@ import type { ThemePreference } from './schemas/settings.ts';
 
 export type {
   AnalyticsQuery,
+  ApplyCategoryRulesInput,
   BudgetQuery,
   CategoryKind,
   ChangePasswordInput,
   ColumnMapping,
   CreateBudgetInput,
   CreateCategoryInput,
+  CreateCategoryRuleInput,
   CreateTransactionInput,
   DateRange,
   DeleteAccountInput,
@@ -48,11 +56,13 @@ export type {
   PeriodKey,
   RegisterInput,
   ReviewStatus,
+  RuleMatchField,
   ThemePreference,
   TransactionQuery,
   TransactionType,
   UpdateBudgetInput,
   UpdateCategoryInput,
+  UpdateCategoryRuleInput,
   UpdateProfileInput,
   UpdateSettingsInput,
 };
@@ -118,8 +128,28 @@ export interface TransactionDTO {
   importBatchId: string | null;
   fingerprint: string | null;
   isSample: boolean;
+  /** For REFUND rows: the EXPENSE this refund reverses. */
+  refundOfTransactionId: string | null;
+  /** Shared id when two rows are a manually paired account transfer. */
+  transferGroupId: string | null;
+  /**
+   * Only present on `GET /transactions/:id` for EXPENSE rows: the amount already
+   * refunded by linked REFUND rows, so a client can prevent over-refunding.
+   */
+  refundedAmount?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A suggested pair of transfer rows that probably represent one movement. */
+export interface TransferSuggestionDTO {
+  /** The two candidate TRANSFER rows (order is not significant). */
+  a: TransactionDTO;
+  b: TransactionDTO;
+  /** Absolute difference in days between the two rows. */
+  dayGap: number;
+  /** Human-readable rationale, safe to display. */
+  reason: string;
 }
 
 export interface BudgetDTO {
@@ -130,6 +160,35 @@ export interface BudgetDTO {
   category: CategoryRef | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A user-defined rule that fills in a missing category. */
+export interface CategoryRuleDTO {
+  id: string;
+  matchField: RuleMatchField;
+  pattern: string;
+  categoryId: string;
+  category: CategoryRef | null;
+  /** Lower number = higher precedence. */
+  priority: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Result of applying category rules, in dry-run or live mode. */
+export interface CategoryRuleApplyResultDTO {
+  dryRun: boolean;
+  /** Rows examined (uncategorised rows, or all rows when including reviewed). */
+  scanned: number;
+  /** Rows a rule could categorise. */
+  matched: number;
+  /** Rows actually written. Always 0 in a dry run. */
+  updated: number;
+  /** Per-rule counts, ordered by precedence. */
+  perRule: { ruleId: string; pattern: string; matchField: RuleMatchField; categoryId: string; matched: number }[];
+  /** Matched rows per category, so the user can see where money will land. */
+  perCategory: { categoryId: string; categoryName: string; matched: number }[];
 }
 
 export interface ImportBatchDTO {

@@ -13,6 +13,7 @@ import { analyticsRouter } from './modules/analytics/analytics.routes.ts';
 import { createAuthRouter } from './modules/auth/auth.routes.ts';
 import { budgetsRouter } from './modules/budgets/budgets.routes.ts';
 import { categoriesRouter } from './modules/categories/categories.routes.ts';
+import { categoryRulesRouter } from './modules/category-rules/category-rules.routes.ts';
 import { healthRouter } from './modules/health/health.routes.ts';
 import { importsRouter } from './modules/imports/imports.routes.ts';
 import { settingsRouter } from './modules/settings/settings.routes.ts';
@@ -103,6 +104,7 @@ export function createApp(): Express {
   protectedApi.use(requireAuth);
   protectedApi.use('/transactions', writeLimiter, transactionsRouter);
   protectedApi.use('/categories', writeLimiter, categoriesRouter);
+  protectedApi.use('/category-rules', writeLimiter, categoryRulesRouter);
   protectedApi.use('/budgets', writeLimiter, budgetsRouter);
   protectedApi.use('/analytics', analyticsRouter);
   protectedApi.use('/imports', importLimiter, importsRouter);

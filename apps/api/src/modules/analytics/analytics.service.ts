@@ -209,7 +209,7 @@ export async function getRecentTransactions(
     orderBy: [{ transactionDate: 'desc' }, { createdAt: 'desc' }],
     take: limit,
   });
-  return rows.map(toTransactionDTO);
+  return rows.map((row) => toTransactionDTO(row));
 }
 
 export async function getLargestExpenses(
@@ -227,7 +227,7 @@ export async function getLargestExpenses(
     orderBy: [{ amount: 'desc' }, { transactionDate: 'desc' }],
     take: limit,
   });
-  return rows.map(toTransactionDTO);
+  return rows.map((row) => toTransactionDTO(row));
 }
 
 export async function getDashboard(workspaceId: string, query: AnalyticsQuery): Promise<DashboardDTO> {

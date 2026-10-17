@@ -30,6 +30,8 @@ const transaction: TransactionDTO = {
   importBatchId: null,
   fingerprint: 'abc',
   isSample: false,
+  refundOfTransactionId: null,
+  transferGroupId: null,
   createdAt: '2026-10-04T10:00:00.000Z',
   updatedAt: '2026-10-04T10:00:00.000Z',
 };

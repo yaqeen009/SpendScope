@@ -9,8 +9,10 @@ import type {
 import { BadRequestError, NotFoundError } from '../../lib/errors.ts';
 import { dateOnlyToUtcDate, dateOnlyRangeFilter, utcDateToDateOnly as toDateOnly } from '../../lib/dates.ts';
 import { buildFingerprint, normalizeMerchant } from '../../lib/fingerprint.ts';
+import { Decimal } from '../../lib/money.ts';
 import { prisma } from '../../lib/prisma.ts';
 import type { Prisma } from '../../lib/prisma.ts';
+import { refundedTotal, resolveRefundLink } from '../../lib/refunds.ts';
 import { toTransactionDTO } from '../../lib/serializers.ts';
 
 const CATEGORY_SELECT = { select: { id: true, name: true, kind: true, color: true } } as const;
@@ -115,7 +117,7 @@ export async function listTransactions(
   ]);
 
   return {
-    data: rows.map(toTransactionDTO),
+    data: rows.map((row) => toTransactionDTO(row)),
     page,
     pageSize,
     total,
@@ -129,14 +131,27 @@ export async function getTransaction(workspaceId: string, id: string): Promise<T
     include: { category: CATEGORY_SELECT },
   });
   if (!row) throw new NotFoundError('Transaction');
-  return toTransactionDTO(row);
+
+  if (row.type !== 'EXPENSE') return toTransactionDTO(row);
+
+  // For an expense, report how much of it has already been refunded so a client
+  // can prevent over-refunding.
+  const refundedAmount = await refundedTotal(prisma, row.id);
+  return toTransactionDTO(row, { refundedAmount });
 }
 
 export async function createTransaction(
   workspaceId: string,
   input: CreateTransactionInput,
 ): Promise<TransactionDTO> {
-  const categoryId = await resolveCategoryId(workspaceId, input.categoryId, input.type);
+  const link = await resolveRefundLink({
+    workspaceId,
+    type: input.type,
+    amount: input.amount,
+    refundOfTransactionId: input.refundOfTransactionId,
+    categoryId: input.categoryId ?? null,
+  });
+  const categoryId = await resolveCategoryId(workspaceId, link.categoryId, input.type);
   const merchant = input.merchant ?? null;
 
   const row = await prisma.transaction.create({
@@ -151,6 +166,7 @@ export async function createTransaction(
       categoryId,
       notes: input.notes ?? null,
       reviewStatus: input.reviewStatus ?? 'NEEDS_REVIEW',
+      refundOfTransactionId: link.refundOfTransactionId,
       fingerprint: buildFingerprint({
         transactionDate: input.transactionDate,
         description: input.description,
@@ -174,18 +190,60 @@ export async function updateTransaction(
   if (!existing) throw new NotFoundError('Transaction');
 
   const type = input.type ?? existing.type;
-  const categoryId =
-    input.categoryId !== undefined
-      ? await resolveCategoryId(workspaceId, input.categoryId, type)
-      : type !== existing.type && existing.categoryId
-        ? await resolveCategoryId(workspaceId, existing.categoryId, type)
-        : undefined;
-
-  const transactionDate = input.transactionDate ?? undefined;
-  const description = input.description ?? existing.description;
   const amount = input.amount ?? existing.amount.toFixed(2);
   const merchant = input.merchant !== undefined ? (input.merchant ?? null) : existing.merchant;
+  const description = input.description ?? existing.description;
+  const transactionDate = input.transactionDate ?? undefined;
   const fingerprintDate = transactionDate ?? toDateOnly(existing.transactionDate);
+
+  // ---- Refund-link rules ---------------------------------------------------
+
+  const requestedLink =
+    input.refundOfTransactionId !== undefined
+      ? (input.refundOfTransactionId ?? null)
+      : existing.refundOfTransactionId;
+
+  // A transaction that already has refunds pointing at it must stay an EXPENSE
+  // and must stay at least as large as the amount already refunded, otherwise
+  // the refunded total would silently exceed the original.
+  if (existing.type === 'EXPENSE') {
+    const refunded = await refundedTotal(prisma, existing.id);
+    if (refunded.greaterThan(0) && type !== 'EXPENSE') {
+      throw new BadRequestError(
+        'This expense has linked refunds, so it cannot be changed to another transaction type. Unlink the refunds first.',
+      );
+    }
+    if (refunded.greaterThan(new Decimal(amount))) {
+      throw new BadRequestError(
+        `The amount cannot be lower than the ${refunded.toFixed(2)} already refunded against this expense`,
+      );
+    }
+  }
+
+  const requestedCategoryId =
+    input.categoryId !== undefined
+      ? (input.categoryId ?? null)
+      : type !== existing.type
+        ? existing.categoryId
+        : undefined;
+
+  let categoryId: string | null | undefined;
+
+  if (requestedLink !== null) {
+    const link = await resolveRefundLink({
+      workspaceId,
+      type,
+      amount,
+      refundOfTransactionId: requestedLink,
+      // `null` means "no explicit category", which is always compatible.
+      categoryId: requestedCategoryId === undefined ? null : requestedCategoryId,
+      selfId: id,
+    });
+    // Linked refunds always inherit the original's category.
+    categoryId = link.categoryId;
+  } else if (requestedCategoryId !== undefined) {
+    categoryId = await resolveCategoryId(workspaceId, requestedCategoryId, type);
+  }
 
   const row = await prisma.transaction.update({
     where: { id },
@@ -198,6 +256,7 @@ export async function updateTransaction(
       ...(categoryId !== undefined ? { categoryId } : {}),
       ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
       ...(input.reviewStatus !== undefined ? { reviewStatus: input.reviewStatus } : {}),
+      refundOfTransactionId: requestedLink,
       fingerprint: buildFingerprint({
         transactionDate: fingerprintDate,
         description,
@@ -209,13 +268,39 @@ export async function updateTransaction(
     include: { category: CATEGORY_SELECT },
   });
 
+  // Keep linked refunds aligned when an expense moves to another category.
+  if (
+    existing.type === 'EXPENSE' &&
+    categoryId !== undefined &&
+    categoryId !== existing.categoryId
+  ) {
+    await prisma.transaction.updateMany({
+      where: { workspaceId, refundOfTransactionId: existing.id },
+      data: { categoryId },
+    });
+  }
+
   return toTransactionDTO(row);
 }
 
 export async function deleteTransaction(workspaceId: string, id: string): Promise<void> {
-  const existing = await prisma.transaction.findFirst({ where: { id, workspaceId }, select: { id: true } });
+  const existing = await prisma.transaction.findFirst({
+    where: { id, workspaceId },
+    select: { id: true, transferGroupId: true },
+  });
   if (!existing) throw new NotFoundError('Transaction');
-  await prisma.transaction.delete({ where: { id } });
+
+  // Removing one side of a paired transfer leaves the other side unpaired
+  // rather than pointing at a group that no longer has two members.
+  await prisma.$transaction(async (tx) => {
+    if (existing.transferGroupId) {
+      await tx.transaction.updateMany({
+        where: { workspaceId, transferGroupId: existing.transferGroupId, id: { not: id } },
+        data: { transferGroupId: null },
+      });
+    }
+    await tx.transaction.delete({ where: { id } });
+  });
 }
 
 export async function countUnreviewed(workspaceId: string): Promise<number> {

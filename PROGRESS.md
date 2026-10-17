@@ -95,4 +95,73 @@ leakage (C-3). Deployment BLOCKED (no credentials/authorization).
 
 ---
 
+## Phase 2 — Financial integrity: refunds and transfers
+
+**Changes**
+
+- `Transaction.refundOfTransactionId` (self-relation, `ON DELETE SET NULL`) and
+  `Transaction.transferGroupId`, plus indexes.
+- `apps/api/src/lib/refunds.ts` — refund-link validation: same workspace, original
+  must be an `EXPENSE`, category inheritance enforced, and the linked refunds can
+  never exceed the original amount (partial and repeated refunds are supported).
+- `apps/api/src/lib/transfers.ts` — manual pairing (`linkTransfer`), unlinking,
+  and deterministic suggestions. Pairing requires two `TRANSFER` rows with equal
+  amounts within five days.
+- `POST /api/v1/transactions/:id/transfer`, `DELETE /api/v1/transactions/:id/transfer`,
+  `GET /api/v1/transactions/transfer-suggestions`.
+- `GET /api/v1/transactions/:id` reports `refundedAmount` for expenses.
+- Changing an expense's category moves its linked refunds with it. Deleting one
+  side of a paired transfer unpairs the survivor. Deleting an expense leaves its
+  refunds in place as unlinked rows.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (api) | **181 passed** (was 141) |
+| `npm run typecheck` | clean |
+
+**Outcome**
+
+- Refunds are explicit, capped, and attributed to the original expense's
+  category, so net spend is correct without extra aggregation SQL.
+- Transfers remain excluded from income and expenses, before and after pairing;
+  pairing is presentation and reconciliation only.
+- Refund and transfer UI is **not implemented**. These endpoints are API-only by
+  decision (no placeholder buttons). Documented in `docs/PRODUCTION_TEST_REPORT.md`.
+
+---
+
+## Phase 4D — Category rules
+
+**Changes**
+
+- `CategoryRule` model + `RuleMatchField` enum
+  (`apps/api/prisma/migrations/20261017120000_category_rules/`).
+- `apps/api/src/lib/category-rules.ts` — matching with a documented, fully
+  deterministic order: `priority` ascending, then pattern length descending
+  (specific beats broad), then id. Kind-safe: an expense rule can never
+  categorise income, and transfers are never categorised.
+- `apps/api/src/modules/category-rules/` — CRUD plus
+  `POST /api/v1/category-rules/apply`.
+- Import integration: rules are a **fallback**. The category named in the CSV
+  wins, then the detected category, then the first matching rule. The preview
+  shows the rule-applied category before anything is written.
+- Retroactive apply defaults to **`dryRun: true`** and only ever fills a missing
+  category; it never overwrites one. It reports per-rule and per-category counts.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (api) | **181 passed**, including 16 new rule tests |
+| `npm run typecheck` | clean |
+
+**Outcome**
+
+- Rules are workspace-scoped, explainable and idempotent.
+- No UI: the rule editor is a deferred item (API-only, documented).
+
+---
+
 <!-- phases appended below as they complete -->

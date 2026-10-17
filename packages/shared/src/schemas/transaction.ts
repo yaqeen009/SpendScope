@@ -32,6 +32,12 @@ export const createTransactionSchema = z.object({
   categoryId: idSchema.nullish(),
   notes: z.string().trim().max(2000).nullish(),
   reviewStatus: reviewStatusSchema.optional(),
+  /**
+   * REFUND rows only: the EXPENSE this refund reverses. The server verifies the
+   * original belongs to the same workspace, and copies its category so the
+   * refund reduces spending in the right category.
+   */
+  refundOfTransactionId: idSchema.nullish(),
 });
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
@@ -40,6 +46,12 @@ export const updateTransactionSchema = createTransactionSchema.partial().refine(
   { message: 'At least one field must be provided' },
 );
 export type UpdateTransactionInput = z.infer<typeof updateTransactionSchema>;
+
+/** Pairs two existing TRANSFER rows as the two sides of one movement. */
+export const linkTransferSchema = z.object({
+  counterpartId: idSchema,
+});
+export type LinkTransferInput = z.infer<typeof linkTransferSchema>;
 
 export const SORTABLE_TRANSACTION_FIELDS = ['date', 'amount', 'description'] as const;
 

@@ -21,6 +21,10 @@ export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 export const IMPORT_STATUSES = ['COMPLETED', 'PARTIAL', 'FAILED'] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
+/** Which free-text field a category rule matches against. */
+export const RULE_MATCH_FIELDS = ['DESCRIPTION', 'MERCHANT', 'ANY'] as const;
+export type RuleMatchField = (typeof RULE_MATCH_FIELDS)[number];
+
 /**
  * The set of transaction types that contribute to the *expense* side of the
  * financial summaries. `REFUND` is treated as a negative expense (money coming

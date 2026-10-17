@@ -4,11 +4,13 @@ import { z } from 'zod';
 import {
   createTransactionSchema,
   idSchema,
+  linkTransferSchema,
   transactionQuerySchema,
   updateTransactionSchema,
   type TransactionQuery,
 } from '@spendscope/shared';
 
+import { linkTransfer, suggestTransfers, unlinkTransfer } from '../../lib/transfers.ts';
 import { paramsOf, queryOf, validateBody, validateParams, validateQuery } from '../../middleware/validate.ts';
 import { workspaceIdOf } from '../../middleware/workspace.ts';
 import {
@@ -27,6 +29,26 @@ transactionsRouter.get('/', validateQuery(transactionQuerySchema), async (_req, 
   const query = queryOf<TransactionQuery>(res);
   const result = await listTransactions(workspaceIdOf(res), query);
   res.json(result);
+});
+
+/**
+ * Advisory only: returns pairs of unpaired TRANSFER rows that look like the two
+ * sides of one movement. Nothing is changed until the user confirms a pairing.
+ * Declared before `/:id` so the literal path is not captured as an id.
+ */
+transactionsRouter.get('/transfer-suggestions', async (_req, res) => {
+  res.json({ data: await suggestTransfers(workspaceIdOf(res)) });
+});
+
+transactionsRouter.post('/:id/transfer', validateParams(idParamsSchema), validateBody(linkTransferSchema), async (req, res) => {
+  const { id } = paramsOf<{ id: string }>(res);
+  const { counterpartId } = req.body as { counterpartId: string };
+  res.json({ data: await linkTransfer(workspaceIdOf(res), id, counterpartId) });
+});
+
+transactionsRouter.delete('/:id/transfer', validateParams(idParamsSchema), async (_req, res) => {
+  const { id } = paramsOf<{ id: string }>(res);
+  res.json({ data: { unlinked: await unlinkTransfer(workspaceIdOf(res), id) } });
 });
 
 transactionsRouter.get('/:id', validateParams(idParamsSchema), async (_req, res) => {
