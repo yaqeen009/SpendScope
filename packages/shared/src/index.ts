@@ -5,6 +5,7 @@ export * from './periods.ts';
 export * from './format.ts';
 export * from './types.ts';
 export * from './schemas/common.ts';
+export * from './schemas/auth.ts';
 export * from './schemas/transaction.ts';
 export * from './schemas/category.ts';
 export * from './schemas/budget.ts';

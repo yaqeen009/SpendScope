@@ -6,9 +6,11 @@ import { pinoHttp } from 'pino-http';
 
 import { env } from './config/env.ts';
 import { logger } from './lib/logger.ts';
+import { attachSession, requireAuth } from './middleware/auth.ts';
+import { requireTrustedOrigin } from './middleware/csrf.ts';
 import { errorHandler, notFoundHandler } from './middleware/validate.ts';
-import { resolveWorkspace } from './middleware/workspace.ts';
 import { analyticsRouter } from './modules/analytics/analytics.routes.ts';
+import { createAuthRouter } from './modules/auth/auth.routes.ts';
 import { budgetsRouter } from './modules/budgets/budgets.routes.ts';
 import { categoriesRouter } from './modules/categories/categories.routes.ts';
 import { healthRouter } from './modules/health/health.routes.ts';
@@ -19,20 +21,23 @@ import { transactionsRouter } from './modules/transactions/transactions.routes.t
 /**
  * Express application factory.
  *
- * Security posture for a local-first finance app:
- *   - CORS is restricted to the configured frontend origin(s).
- *   - `helmet` sets safe defaults; CSP is disabled because the API serves JSON
- *     and CSV only (the SPA is served by Vite/its own host).
+ * Security posture:
+ *   - CORS is restricted to the configured frontend origin(s); credentials are
+ *     never sent cross-origin.
+ *   - `helmet` safe defaults (CSP disabled: the API serves JSON/CSV, not HTML).
+ *   - Session cookie authentication (`HttpOnly`, `SameSite=Lax`, `Secure` in
+ *     production) resolved once per request by `attachSession`.
+ *   - An origin check on state-changing requests (CSRF defence in depth).
+ *   - Every data route requires an authenticated session and is scoped to the
+ *     workspace that session owns.
  *   - Request bodies are capped at the configured CSV size.
  *   - Sensitive endpoints are rate-limited.
- *   - There is NO authentication in this MVP. The API must run on a trusted
- *     machine or behind an authenticating proxy — see docs/SECURITY.md.
  */
 export function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.set('trust proxy', false);
+  app.set('trust proxy', env.TRUST_PROXY);
 
   app.use(
     helmet({
@@ -45,11 +50,10 @@ export function createApp(): Express {
     cors({
       origin(origin, callback) {
         // Same-origin / curl requests have no Origin header and are allowed.
-        if (!origin || env.corsOrigins.includes(origin)) {
-          callback(null, true);
-          return;
-        }
-        callback(new Error('Not allowed by CORS'));
+        // A foreign origin is not an error here: no CORS headers are sent, the
+        // browser blocks the response, and `requireTrustedOrigin` turns
+        // state-changing requests into a clean 403.
+        callback(null, !origin || env.corsOrigins.includes(origin));
       },
       methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: false,
@@ -61,7 +65,7 @@ export function createApp(): Express {
     pinoHttp({
       logger,
       autoLogging: {
-        ignore: (req) => req.url === '/api/v1/health',
+        ignore: (req) => req.url === '/api/v1/health' || req.url === '/api/v1/ready',
       },
     }),
   );
@@ -84,17 +88,26 @@ export function createApp(): Express {
     message: { error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again shortly.' } },
   });
 
-  // Health does not require a workspace and is intentionally unauthenticated.
+  // Liveness/readiness does not require a session.
   app.use('/api/v1/health', healthRouter);
 
   const v1 = express.Router();
-  v1.use(resolveWorkspace);
-  v1.use('/transactions', writeLimiter, transactionsRouter);
-  v1.use('/categories', writeLimiter, categoriesRouter);
-  v1.use('/budgets', writeLimiter, budgetsRouter);
-  v1.use('/analytics', analyticsRouter);
-  v1.use('/imports', importLimiter, importsRouter);
-  v1.use('/settings', writeLimiter, settingsRouter);
+  v1.use(attachSession);
+  v1.use(requireTrustedOrigin);
+
+  // Authentication endpoints are public (they create or destroy a session).
+  v1.use('/auth', createAuthRouter());
+
+  // Everything below requires a live session.
+  const protectedApi = express.Router();
+  protectedApi.use(requireAuth);
+  protectedApi.use('/transactions', writeLimiter, transactionsRouter);
+  protectedApi.use('/categories', writeLimiter, categoriesRouter);
+  protectedApi.use('/budgets', writeLimiter, budgetsRouter);
+  protectedApi.use('/analytics', analyticsRouter);
+  protectedApi.use('/imports', importLimiter, importsRouter);
+  protectedApi.use('/settings', writeLimiter, settingsRouter);
+  v1.use(protectedApi);
 
   app.use('/api/v1', v1);
 

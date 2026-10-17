@@ -1,4 +1,4 @@
-import request from 'supertest';
+import { api } from './helpers/api.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.ts';
@@ -20,7 +20,7 @@ async function preview(content: string, extra: Record<string, unknown> = {}) {
   // Re-mapping an existing preview sends no content at all, so only include it
   // when there is a file to upload.
   const body = content ? { filename: 'statement.csv', content, ...extra } : extra;
-  const response = await request(app).post('/api/v1/imports/preview').send(body).expect(200);
+  const response = await api(app).post('/api/v1/imports/preview').send(body).expect(200);
   return response.body.data;
 }
 
@@ -30,7 +30,7 @@ describe('import wizard: template and mapping', () => {
   });
 
   it('serves a downloadable CSV template', async () => {
-    const response = await request(app).get('/api/v1/imports/template').expect(200);
+    const response = await api(app).get('/api/v1/imports/template').expect(200);
     expect(response.headers['content-type']).toMatch(/text\/csv/);
     expect(response.text).toContain('Date,Description,Merchant,Amount,Type');
   });
@@ -84,7 +84,7 @@ describe('POST /api/v1/imports (commit)', () => {
       (row: { description: string }) => row.description === 'Netflix subscription',
     );
 
-    const commit = await request(app)
+    const commit = await api(app)
       .post('/api/v1/imports')
       .send({
         previewId: data.previewId,
@@ -101,7 +101,7 @@ describe('POST /api/v1/imports (commit)', () => {
       invalidRows: 1,
     });
 
-    const listed = await request(app).get('/api/v1/transactions').expect(200);
+    const listed = await api(app).get('/api/v1/transactions').expect(200);
     expect(listed.body.total).toBe(3);
 
     const netflix = listed.body.data.find(
@@ -116,19 +116,19 @@ describe('POST /api/v1/imports (commit)', () => {
     const data = await preview(HEADERED_CSV);
     expect(data.summary).toMatchObject({ valid: 0, duplicatesExact: 3, invalid: 1 });
 
-    const commit = await request(app)
+    const commit = await api(app)
       .post('/api/v1/imports')
       .send({ previewId: data.previewId, mode: 'skip_invalid' })
       .expect(201);
     expect(commit.body.data).toMatchObject({ created: 0, skippedDuplicates: 3, rejected: 1 });
 
-    const listed = await request(app).get('/api/v1/transactions').expect(200);
+    const listed = await api(app).get('/api/v1/transactions').expect(200);
     expect(listed.body.total).toBe(3);
   });
 
   it('refuses to import anything when block_on_invalid is set', async () => {
     const data = await preview(HEADERED_CSV);
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/imports')
       .send({ previewId: data.previewId, mode: 'block_on_invalid' })
       .expect(400);
@@ -139,14 +139,14 @@ describe('POST /api/v1/imports (commit)', () => {
     const data = await preview(OPAQUE_CSV, {
       mapping: { date: 'When', description: 'What', amount: 'How much' },
     });
-    await request(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(201);
-    await request(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(404);
+    await api(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(201);
+    await api(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(404);
   });
 
   it('rejects a category override that does not match the row type', async () => {
     const data = await preview(HEADERED_CSV);
     const salaryRow = data.rows.find((row: { description: string }) => row.description === 'Monthly salary');
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/imports')
       .send({
         previewId: data.previewId,
@@ -164,25 +164,25 @@ describe('import history and error report', () => {
 
   it('lists batches and exposes a per-batch detail', async () => {
     const data = await preview(HEADERED_CSV);
-    const commit = await request(app)
+    const commit = await api(app)
       .post('/api/v1/imports')
       .send({ previewId: data.previewId })
       .expect(201);
     const batchId = commit.body.data.batch.id;
 
-    const history = await request(app).get('/api/v1/imports').expect(200);
+    const history = await api(app).get('/api/v1/imports').expect(200);
     expect(history.body.total).toBe(1);
     expect(history.body.data[0].id).toBe(batchId);
 
-    const detail = await request(app).get(`/api/v1/imports/${batchId}`).expect(200);
+    const detail = await api(app).get(`/api/v1/imports/${batchId}`).expect(200);
     expect(detail.body.data.filename).toBe('statement.csv');
 
-    await request(app).get('/api/v1/imports/00000000-0000-4000-8000-000000000000').expect(404);
+    await api(app).get('/api/v1/imports/00000000-0000-4000-8000-000000000000').expect(404);
   });
 
   it('downloads a CSV error report for a live preview', async () => {
     const data = await preview(HEADERED_CSV);
-    const response = await request(app)
+    const response = await api(app)
       .get(`/api/v1/imports/previews/${data.previewId}/report`)
       .expect(200);
     expect(response.headers['content-type']).toMatch(/text\/csv/);
@@ -193,7 +193,7 @@ describe('import history and error report', () => {
   });
 
   it('returns 404 for an unknown preview', async () => {
-    await request(app)
+    await api(app)
       .get('/api/v1/imports/previews/00000000-0000-4000-8000-000000000000/report')
       .expect(404);
   });

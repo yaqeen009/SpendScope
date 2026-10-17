@@ -1,4 +1,4 @@
-import request from 'supertest';
+import { api } from './helpers/api.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.ts';
@@ -17,7 +17,7 @@ interface Category {
 }
 
 async function listCategories(): Promise<Category[]> {
-  const response = await request(app).get('/api/v1/categories').expect(200);
+  const response = await api(app).get('/api/v1/categories').expect(200);
   return response.body.data as Category[];
 }
 
@@ -43,7 +43,7 @@ describe('GET /api/v1/categories', () => {
   it('reports per-category lifetime totals', async () => {
     const groceries = await findByName('Groceries');
 
-    await request(app)
+    await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-01',
@@ -53,7 +53,7 @@ describe('GET /api/v1/categories', () => {
         categoryId: groceries.id,
       })
       .expect(201);
-    await request(app)
+    await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-02',
@@ -76,7 +76,7 @@ describe('POST/PATCH /api/v1/categories', () => {
   });
 
   it('creates a custom category', async () => {
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/categories')
       .send({ name: 'Pets', kind: 'EXPENSE', color: '#123456', description: 'Vet and food' })
       .expect(201);
@@ -90,32 +90,32 @@ describe('POST/PATCH /api/v1/categories', () => {
   });
 
   it('rejects a duplicate name with 409', async () => {
-    await request(app)
+    await api(app)
       .post('/api/v1/categories')
       .send({ name: 'Pets', kind: 'EXPENSE' })
       .expect(409);
   });
 
   it('rejects a malformed colour', async () => {
-    await request(app)
+    await api(app)
       .post('/api/v1/categories')
       .send({ name: 'Bad Colour', kind: 'EXPENSE', color: 'green' })
       .expect(400);
   });
 
   it('allows renaming but refuses a classification change while in use', async () => {
-    const created = await request(app)
+    const created = await api(app)
       .post('/api/v1/categories')
       .send({ name: 'Hobbies', kind: 'EXPENSE' })
       .expect(201);
 
-    const renamed = await request(app)
+    const renamed = await api(app)
       .patch(`/api/v1/categories/${created.body.data.id}`)
       .send({ name: 'Hobbies & Crafts' })
       .expect(200);
     expect(renamed.body.data.name).toBe('Hobbies & Crafts');
 
-    await request(app)
+    await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-01',
@@ -126,7 +126,7 @@ describe('POST/PATCH /api/v1/categories', () => {
       })
       .expect(201);
 
-    await request(app)
+    await api(app)
       .patch(`/api/v1/categories/${created.body.data.id}`)
       .send({ kind: 'INCOME' })
       .expect(409);
@@ -139,16 +139,16 @@ describe('DELETE /api/v1/categories/:id', () => {
   });
 
   async function categoryWithTransactions(name: string): Promise<{ id: string; otherId: string }> {
-    const created = await request(app)
+    const created = await api(app)
       .post('/api/v1/categories')
       .send({ name, kind: 'EXPENSE' })
       .expect(201);
-    const other = await request(app)
+    const other = await api(app)
       .post('/api/v1/categories')
       .send({ name: `${name} alt`, kind: 'EXPENSE' })
       .expect(201);
 
-    await request(app)
+    await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-01',
@@ -164,36 +164,36 @@ describe('DELETE /api/v1/categories/:id', () => {
 
   it('blocks deletion while transactions are linked (default strategy)', async () => {
     const { id } = await categoryWithTransactions('Blocked');
-    const response = await request(app).delete(`/api/v1/categories/${id}`).expect(409);
+    const response = await api(app).delete(`/api/v1/categories/${id}`).expect(409);
     expect(response.body.error.details.linkedTransactions).toBe(1);
   });
 
   it('reassigns linked transactions when asked', async () => {
     const { id, otherId } = await categoryWithTransactions('Reassign me');
-    const response = await request(app)
+    const response = await api(app)
       .delete(`/api/v1/categories/${id}?strategy=reassign&reassignTo=${otherId}`)
       .expect(200);
     expect(response.body.data).toEqual({ deleted: true, reassigned: 1, uncategorized: 0 });
 
-    const rows = await request(app).get(`/api/v1/transactions?categoryId=${otherId}`).expect(200);
+    const rows = await api(app).get(`/api/v1/transactions?categoryId=${otherId}`).expect(200);
     expect(rows.body.data).toHaveLength(1);
   });
 
   it('uncategorises linked transactions when asked', async () => {
     const { id } = await categoryWithTransactions('Uncategorise me');
-    const response = await request(app)
+    const response = await api(app)
       .delete(`/api/v1/categories/${id}?strategy=uncategorize`)
       .expect(200);
     expect(response.body.data).toEqual({ deleted: true, reassigned: 0, uncategorized: 1 });
 
-    const rows = await request(app).get('/api/v1/transactions?categoryId=uncategorized').expect(200);
+    const rows = await api(app).get('/api/v1/transactions?categoryId=uncategorized').expect(200);
     expect(rows.body.data).toHaveLength(1);
   });
 
   it('refuses to reassign to a category of another kind', async () => {
     const { id } = await categoryWithTransactions('Wrong kind target');
     const salary = await findByName('Salary');
-    await request(app)
+    await api(app)
       .delete(`/api/v1/categories/${id}?strategy=reassign&reassignTo=${salary.id}`)
       .expect(400);
   });

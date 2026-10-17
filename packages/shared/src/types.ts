@@ -7,6 +7,13 @@
  */
 
 import type { AnalyticsQuery } from './schemas/analytics.ts';
+import type {
+  ChangePasswordInput,
+  DeleteAccountInput,
+  LoginInput,
+  RegisterInput,
+  UpdateProfileInput,
+} from './schemas/auth.ts';
 import type { BudgetQuery, CreateBudgetInput, UpdateBudgetInput } from './schemas/budget.ts';
 import type { CreateCategoryInput, UpdateCategoryInput } from './schemas/category.ts';
 import type { ColumnMapping } from './schemas/import.ts';
@@ -28,20 +35,25 @@ export type {
   AnalyticsQuery,
   BudgetQuery,
   CategoryKind,
+  ChangePasswordInput,
   ColumnMapping,
   CreateBudgetInput,
   CreateCategoryInput,
   CreateTransactionInput,
   DateRange,
+  DeleteAccountInput,
   Granularity,
   ImportStatus,
+  LoginInput,
   PeriodKey,
+  RegisterInput,
   ReviewStatus,
   ThemePreference,
   TransactionQuery,
   TransactionType,
   UpdateBudgetInput,
   UpdateCategoryInput,
+  UpdateProfileInput,
   UpdateSettingsInput,
 };
 export type { UpdateTransactionInput } from './schemas/transaction.ts';
@@ -139,6 +151,30 @@ export interface WorkspaceDTO {
   id: string;
   name: string;
   isDemo: boolean;
+}
+
+/** Public account fields. Never includes the password hash. */
+export interface AuthUserDTO {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface AuthSessionDTO {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  lastUsedAt: string;
+  /** Truncated user-agent for display; null when the client sent none. */
+  userAgent: string | null;
+  /** True for the session that made the current request. */
+  current: boolean;
+}
+
+export interface AuthStateDTO {
+  user: AuthUserDTO;
+  workspace: WorkspaceDTO;
 }
 
 export interface SettingsDTO {

@@ -1,22 +1,14 @@
-import type { NextFunction, Request, Response } from 'express';
+import type { Response } from 'express';
 
-import { getWorkspaceId } from '../modules/workspace/workspace.service.ts';
+import { authOf } from './auth.ts';
 
 /**
- * Resolves the active workspace for the request.
+ * The active workspace is always the authenticated user's workspace.
  *
- * The MVP has a single workspace, but every service call is scoped by the id
- * resolved here, so authentication can later replace this one function.
+ * Every service already scopes its queries by the id returned here, so tenant
+ * isolation is enforced in one place: nothing reads a workspace id from the
+ * request body, path or query.
  */
-export async function resolveWorkspace(_req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    res.locals.workspaceId = await getWorkspaceId();
-    next();
-  } catch (error) {
-    next(error);
-  }
-}
-
 export function workspaceIdOf(res: Response): string {
-  return res.locals.workspaceId as string;
+  return authOf(res).workspace.id;
 }

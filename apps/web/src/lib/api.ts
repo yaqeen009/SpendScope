@@ -78,17 +78,36 @@ export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  /** Skip the global 401 handler (used while probing the session). */
+  skipAuthRedirect?: boolean;
+}
+
+/**
+ * Called when the API answers 401, so the auth layer can clear its cache and
+ * send the user to the sign-in screen. Registered once by the auth provider.
+ */
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal } = options;
+  const { method = 'GET', body, signal, skipAuthRedirect = false } = options;
 
   const response = await fetch(`${BASE_URL}${API_PREFIX}${path}`, {
     method,
+    // The session is an HttpOnly cookie: it is only sent when credentials are
+    // included, and never read by JavaScript.
+    credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
+
+  if (response.status === 401 && !skipAuthRedirect) {
+    unauthorizedHandler?.();
+  }
 
   return parse<T>(response);
 }

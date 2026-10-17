@@ -1,4 +1,4 @@
-import request from 'supertest';
+import { api } from './helpers/api.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.ts';
@@ -14,14 +14,14 @@ interface Category {
 }
 
 async function categoryId(name: string): Promise<string> {
-  const response = await request(app).get('/api/v1/categories').expect(200);
+  const response = await api(app).get('/api/v1/categories').expect(200);
   const match = (response.body.data as Category[]).find((category) => category.name === name);
   if (!match) throw new Error(`Category "${name}" not found`);
   return match.id;
 }
 
 async function addTransaction(body: Record<string, unknown>) {
-  await request(app).post('/api/v1/transactions').send(body).expect(201);
+  await api(app).post('/api/v1/transactions').send(body).expect(201);
 }
 
 describe('analytics over a fixed period', () => {
@@ -74,7 +74,7 @@ describe('analytics over a fixed period', () => {
   });
 
   it('summarises income, expenses, refunds and transfers correctly', async () => {
-    const response = await request(app).get(`/api/v1/analytics/summary?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/summary?${RANGE}`).expect(200);
     const { current, period } = response.body.data;
 
     expect(period).toMatchObject({ start: '2026-03-01', end: '2026-03-31' });
@@ -91,7 +91,7 @@ describe('analytics over a fixed period', () => {
   });
 
   it('breaks down spend by category and nets refunds out', async () => {
-    const response = await request(app).get(`/api/v1/analytics/categories?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/categories?${RANGE}`).expect(200);
     const { total, items } = response.body.data as {
       total: string;
       items: { name: string; total: string; kind: string; share: number }[];
@@ -107,7 +107,7 @@ describe('analytics over a fixed period', () => {
   });
 
   it('builds a daily time series covering the whole range', async () => {
-    const response = await request(app).get(`/api/v1/analytics/time-series?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/time-series?${RANGE}`).expect(200);
     const { granularity, points, range } = response.body.data;
 
     expect(granularity).toBe('day');
@@ -126,21 +126,21 @@ describe('analytics over a fixed period', () => {
   });
 
   it('produces at least six monthly trend points', async () => {
-    const response = await request(app).get(`/api/v1/analytics/monthly-trend?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/monthly-trend?${RANGE}`).expect(200);
     const months = response.body.data.months as { month: string }[];
     expect(months.length).toBeGreaterThanOrEqual(6);
     expect(months[months.length - 1]?.month).toBe('2026-03');
   });
 
   it('returns the largest expenses without transfers or refunds', async () => {
-    const response = await request(app).get(`/api/v1/analytics/largest-expenses?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/largest-expenses?${RANGE}`).expect(200);
     const rows = response.body.data as { type: string; amount: string }[];
     expect(rows.every((row) => row.type === 'EXPENSE')).toBe(true);
     expect(rows[0]?.amount).toBe('312.45');
   });
 
   it('returns recent transactions including transfers', async () => {
-    const response = await request(app)
+    const response = await api(app)
       .get(`/api/v1/analytics/recent-transactions?${RANGE}&recentLimit=3`)
       .expect(200);
     expect(response.body.data).toHaveLength(3);
@@ -148,7 +148,7 @@ describe('analytics over a fixed period', () => {
   });
 
   it('assembles the dashboard payload', async () => {
-    const response = await request(app).get(`/api/v1/analytics/dashboard?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/dashboard?${RANGE}`).expect(200);
     const dashboard = response.body.data;
 
     expect(dashboard.empty).toBe(false);
@@ -160,7 +160,7 @@ describe('analytics over a fixed period', () => {
 
   it('reports empty=true on a database with no transactions', async () => {
     await resetDatabase();
-    const response = await request(app).get(`/api/v1/analytics/dashboard?${RANGE}`).expect(200);
+    const response = await api(app).get(`/api/v1/analytics/dashboard?${RANGE}`).expect(200);
     expect(response.body.data.empty).toBe(true);
     expect(response.body.data.summary.current).toMatchObject({ income: '0.00', expenses: '0.00' });
   });

@@ -118,12 +118,6 @@ async function buildExistingIndex(
   };
 }
 
-async function currentWorkspaceId(): Promise<string> {
-  const workspace = await prisma.workspace.findFirst({ orderBy: { createdAt: 'asc' }, select: { id: true } });
-  if (!workspace) throw new NotFoundError('Workspace');
-  return workspace.id;
-}
-
 async function loadCategoryIndex(workspaceId: string): Promise<{
   byNameAndKind: Map<string, string>;
   kindById: Map<string, CategoryKind>;
@@ -245,10 +239,9 @@ function parseSource(filename: string, content: string): ParsedSource {
 }
 
 export async function previewImport(
+  workspaceId: string,
   input: ImportPreviewInput,
 ): Promise<ImportPreviewDTO> {
-  const workspaceId = await currentWorkspaceId();
-
   let source: ParsedSource;
   if (input.previewId) {
     const stored = importPreviewStore.get(input.previewId);
@@ -381,9 +374,9 @@ export interface CandidateBundle {
 
 /** Re-derives candidates from the stored preview (never from client data). */
 export async function rebuildCandidatesForPreview(
+  workspaceId: string,
   previewId: string,
 ): Promise<CandidateBundle> {
-  const workspaceId = await currentWorkspaceId();
   const stored = importPreviewStore.get(previewId);
   if (!stored || stored.workspaceId !== workspaceId) {
     throw new NotFoundError('Import preview (it may have expired — upload the file again)');
@@ -404,9 +397,11 @@ export async function rebuildCandidatesForPreview(
   return { candidates, mapping, filename: stored.filename };
 }
 
-export async function commitImport(input: ImportCommitInput): Promise<ImportCommitResultDTO> {
-  const workspaceId = await currentWorkspaceId();
-  const { candidates, filename } = await rebuildCandidatesForPreview(input.previewId);
+export async function commitImport(
+  workspaceId: string,
+  input: ImportCommitInput,
+): Promise<ImportCommitResultDTO> {
+  const { candidates, filename } = await rebuildCandidatesForPreview(workspaceId, input.previewId);
   const categories = await loadCategoryIndex(workspaceId);
 
   const overrides = new Map<number, string | null>();
@@ -590,8 +585,11 @@ export async function getImportBatch(workspaceId: string, id: string): Promise<I
 }
 
 /** CSV error report for a live preview, generated server-side and safely escaped. */
-export async function buildPreviewErrorReport(previewId: string): Promise<{ filename: string; csv: string }> {
-  const { candidates, filename } = await rebuildCandidatesForPreview(previewId);
+export async function buildPreviewErrorReport(
+  workspaceId: string,
+  previewId: string,
+): Promise<{ filename: string; csv: string }> {
+  const { candidates, filename } = await rebuildCandidatesForPreview(workspaceId, previewId);
 
   const rows: string[][] = [
     ['record', 'status', 'errors', 'transaction_date', 'description', 'amount', 'type', 'category'],

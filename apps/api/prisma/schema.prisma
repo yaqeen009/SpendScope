@@ -42,11 +42,50 @@ enum ImportStatus {
   FAILED
 }
 
-/// A tenancy boundary. The MVP has a single default workspace.
+/// An account. Authentication is required for every API operation except
+/// register/login/health; a user owns one or more workspaces.
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased; unique across the installation.
+  email        String    @unique
+  name         String
+  /// scrypt hash in `scrypt$N$r$p$salt$hash` form. Never returned by the API.
+  passwordHash String
+  /// Disabled accounts cannot log in; existing sessions are rejected.
+  disabled     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  workspaces   Workspace[]
+
+  @@index([createdAt])
+}
+
+/// An opaque, server-side session. Only the SHA-256 hash of the bearer token is
+/// stored, so a database read cannot be replayed as a login.
+model Session {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the random session token. Unique because it is the lookup key.
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastUsedAt DateTime @default(now())
+  userAgent  String?
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// A tenancy boundary owned by exactly one user.
 model Workspace {
   id            String        @id @default(uuid()) @db.Uuid
   name          String
   isDemo        Boolean       @default(false)
+  /// Nullable only for workspaces created before authentication existed; a
+  /// workspace with no owner is not reachable through the API.
+  ownerUserId   String?       @db.Uuid
+  owner         User?         @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   transactions  Transaction[]
@@ -54,6 +93,8 @@ model Workspace {
   budgets       Budget[]
   importBatches ImportBatch[]
   settings      Settings?
+
+  @@index([ownerUserId])
 }
 
 model Category {
@@ -147,10 +188,13 @@ model ImportBatch {
   @@index([workspaceId, createdAt])
 }
 
-/// Single-row application settings (`id = 1`).
+/// Per-workspace application settings.
+///
+/// `workspaceId` is the primary key: every workspace has exactly one settings
+/// row. (The original schema used a singleton `id = 1`, which cannot represent
+/// more than one workspace and was fixed when authentication was introduced.)
 model Settings {
-  id            Int      @id @default(1)
-  workspaceId   String   @unique @db.Uuid
+  workspaceId   String   @id @db.Uuid
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   currency      String   @default("GHS")
   locale        String   @default("en-GH")

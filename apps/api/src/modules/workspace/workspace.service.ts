@@ -41,6 +41,7 @@ export async function ensureDefaultCategories(db: Db, workspaceId: string): Prom
  */
 export async function ensureWorkspace(): Promise<{ id: string; created: boolean }> {
   const existing = await prisma.workspace.findFirst({
+    where: { ownerUserId: null },
     orderBy: { createdAt: 'asc' },
     select: { id: true },
   });
@@ -65,17 +66,4 @@ export async function ensureWorkspace(): Promise<{ id: string; created: boolean 
   });
 
   return { id: workspace.id, created: true };
-}
-
-export async function getWorkspaceId(): Promise<string> {
-  const workspace = await prisma.workspace.findFirst({
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  });
-  if (!workspace) {
-    throw new Error(
-      'No workspace found. Run `npm run db:seed` (or start the API, which bootstraps a workspace) first.',
-    );
-  }
-  return workspace.id;
 }

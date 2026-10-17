@@ -9,6 +9,8 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'BAD_REQUEST'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
   | 'PAYLOAD_TOO_LARGE'
   | 'UNSUPPORTED_MEDIA_TYPE'
   | 'RATE_LIMITED'
@@ -53,6 +55,20 @@ export class ConflictError extends AppError {
   constructor(message: string, details?: unknown) {
     super(409, 'CONFLICT', message, details);
     this.name = 'ConflictError';
+  }
+}
+
+export class UnauthorizedError extends AppError {
+  constructor(message = 'Authentication is required') {
+    super(401, 'UNAUTHORIZED', message);
+    this.name = 'UnauthorizedError';
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message = 'You do not have access to this resource') {
+    super(403, 'FORBIDDEN', message);
+    this.name = 'ForbiddenError';
   }
 }
 

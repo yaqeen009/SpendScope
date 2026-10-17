@@ -1,4 +1,4 @@
-import request from 'supertest';
+import { api } from './helpers/api.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.ts';
@@ -13,14 +13,14 @@ interface Category {
 }
 
 async function categoryId(name: string): Promise<string> {
-  const response = await request(app).get('/api/v1/categories').expect(200);
+  const response = await api(app).get('/api/v1/categories').expect(200);
   const match = (response.body.data as Category[]).find((category) => category.name === name);
   if (!match) throw new Error(`Category "${name}" not found`);
   return match.id;
 }
 
 async function expense(description: string, amount: string, date: string, id: string | null) {
-  await request(app)
+  await api(app)
     .post('/api/v1/transactions')
     .send({ transactionDate: date, description, amount, type: 'EXPENSE', categoryId: id })
     .expect(201);
@@ -34,7 +34,7 @@ describe('POST /api/v1/budgets', () => {
   it('creates a category budget and a total budget', async () => {
     const groceriesId = await categoryId('Groceries');
 
-    const categoryBudget = await request(app)
+    const categoryBudget = await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-03', amount: '800.00', categoryId: groceriesId })
       .expect(201);
@@ -44,7 +44,7 @@ describe('POST /api/v1/budgets', () => {
       categoryId: groceriesId,
     });
 
-    const totalBudget = await request(app)
+    const totalBudget = await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-03', amount: '4000.00' })
       .expect(201);
@@ -54,23 +54,23 @@ describe('POST /api/v1/budgets', () => {
 
   it('enforces one budget per category per month', async () => {
     const groceriesId = await categoryId('Groceries');
-    await request(app)
+    await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-03', amount: '900.00', categoryId: groceriesId })
       .expect(409);
   });
 
   it('enforces a single total budget per month', async () => {
-    await request(app).post('/api/v1/budgets').send({ month: '2026-03', amount: '5000.00' }).expect(409);
+    await api(app).post('/api/v1/budgets').send({ month: '2026-03', amount: '5000.00' }).expect(409);
   });
 
   it('rejects a zero amount', async () => {
-    await request(app).post('/api/v1/budgets').send({ month: '2026-04', amount: '0.00' }).expect(400);
+    await api(app).post('/api/v1/budgets').send({ month: '2026-04', amount: '0.00' }).expect(400);
   });
 
   it('refuses budgets on income categories', async () => {
     const salaryId = await categoryId('Salary');
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-04', amount: '100.00', categoryId: salaryId })
       .expect(400);
@@ -82,22 +82,22 @@ describe('GET /api/v1/budgets', () => {
   beforeAll(async () => {
     await resetDatabase();
     const groceriesId = await categoryId('Groceries');
-    await request(app)
+    await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-03', amount: '800.00', categoryId: groceriesId })
       .expect(201);
-    await request(app).post('/api/v1/budgets').send({ month: '2026-03', amount: '4000.00' }).expect(201);
-    await request(app).post('/api/v1/budgets').send({ month: '2026-04', amount: '4200.00' }).expect(201);
+    await api(app).post('/api/v1/budgets').send({ month: '2026-03', amount: '4000.00' }).expect(201);
+    await api(app).post('/api/v1/budgets').send({ month: '2026-04', amount: '4200.00' }).expect(201);
   });
 
   it('filters by month', async () => {
-    const response = await request(app).get('/api/v1/budgets?month=2026-03').expect(200);
+    const response = await api(app).get('/api/v1/budgets?month=2026-03').expect(200);
     expect(response.body.data).toHaveLength(2);
     expect(response.body.data.every((budget: { month: string }) => budget.month === '2026-03')).toBe(true);
   });
 
   it('filters by month range', async () => {
-    const response = await request(app).get('/api/v1/budgets?from=2026-04&to=2026-04').expect(200);
+    const response = await api(app).get('/api/v1/budgets?from=2026-04&to=2026-04').expect(200);
     expect(response.body.data).toHaveLength(1);
     expect(response.body.data[0].month).toBe('2026-04');
   });
@@ -109,12 +109,12 @@ describe('GET /api/v1/budgets/progress/:month', () => {
     const groceriesId = await categoryId('Groceries');
     const transportId = await categoryId('Transport');
 
-    await request(app).post('/api/v1/budgets').send({ month: '2026-03', amount: '1000.00' }).expect(201);
-    await request(app)
+    await api(app).post('/api/v1/budgets').send({ month: '2026-03', amount: '1000.00' }).expect(201);
+    await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-03', amount: '500.00', categoryId: groceriesId })
       .expect(201);
-    await request(app)
+    await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-03', amount: '200.00', categoryId: transportId })
       .expect(201);
@@ -127,7 +127,7 @@ describe('GET /api/v1/budgets/progress/:month', () => {
   });
 
   it('computes spend, remaining and state per budget', async () => {
-    const response = await request(app).get('/api/v1/budgets/progress/2026-03').expect(200);
+    const response = await api(app).get('/api/v1/budgets/progress/2026-03').expect(200);
     const { items, total } = response.body.data as {
       items: {
         categoryName: string | null;
@@ -153,11 +153,11 @@ describe('GET /api/v1/budgets/progress/:month', () => {
   });
 
   it('rejects a malformed month', async () => {
-    await request(app).get('/api/v1/budgets/progress/2026-13').expect(400);
+    await api(app).get('/api/v1/budgets/progress/2026-13').expect(400);
   });
 
   it('returns an empty result for a month with no budgets', async () => {
-    const response = await request(app).get('/api/v1/budgets/progress/2025-01').expect(200);
+    const response = await api(app).get('/api/v1/budgets/progress/2025-01').expect(200);
     expect(response.body.data.items).toHaveLength(0);
     expect(response.body.data.total).toBeNull();
   });
@@ -169,18 +169,18 @@ describe('PATCH/DELETE /api/v1/budgets/:id', () => {
   });
 
   it('updates and deletes a budget', async () => {
-    const created = await request(app)
+    const created = await api(app)
       .post('/api/v1/budgets')
       .send({ month: '2026-05', amount: '100.00' })
       .expect(201);
 
-    const updated = await request(app)
+    const updated = await api(app)
       .patch(`/api/v1/budgets/${created.body.data.id}`)
       .send({ amount: '150.00' })
       .expect(200);
     expect(updated.body.data.amount).toBe('150.00');
 
-    await request(app).delete(`/api/v1/budgets/${created.body.data.id}`).expect(204);
-    await request(app).get(`/api/v1/budgets/${created.body.data.id}`).expect(404);
+    await api(app).delete(`/api/v1/budgets/${created.body.data.id}`).expect(204);
+    await api(app).get(`/api/v1/budgets/${created.body.data.id}`).expect(404);
   });
 });

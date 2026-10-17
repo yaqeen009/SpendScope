@@ -30,18 +30,18 @@ importsRouter.get('/template', (_req, res) => {
 
 /** Stage 2/3: parse, detect the mapping, and validate the rows. */
 importsRouter.post('/preview', validateBody(importPreviewSchema), async (req, res) => {
-  res.json({ data: await previewImport(req.body) });
+  res.json({ data: await previewImport(workspaceIdOf(res), req.body) });
 });
 
 importsRouter.get('/previews/:id/report', validateParams(idParamsSchema), async (_req, res) => {
   const { id } = paramsOf<{ id: string }>(res);
-  const report = await buildPreviewErrorReport(id);
+  const report = await buildPreviewErrorReport(workspaceIdOf(res), id);
   res.type('text/csv').attachment(report.filename).send(report.csv);
 });
 
 /** Stage 5: commit a validated preview. */
 importsRouter.post('/', validateBody(importCommitSchema), async (req, res) => {
-  res.status(201).json({ data: await commitImport(req.body) });
+  res.status(201).json({ data: await commitImport(workspaceIdOf(res), req.body) });
 });
 
 importsRouter.get('/', validateQuery(importHistoryQuerySchema), async (_req, res) => {

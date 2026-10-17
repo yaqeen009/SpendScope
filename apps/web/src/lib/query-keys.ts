@@ -9,6 +9,13 @@ export const queryKeys = {
   health: ['health'] as const,
   settings: ['settings'] as const,
 
+  auth: {
+    all: ['auth'] as const,
+    me: ['auth', 'me'] as const,
+    config: ['auth', 'config'] as const,
+    sessions: ['auth', 'sessions'] as const,
+  },
+
   transactions: {
     all: ['transactions'] as const,
     list: (params: object) => ['transactions', 'list', params] as const,

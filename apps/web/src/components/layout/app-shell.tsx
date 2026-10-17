@@ -1,23 +1,28 @@
 import { Suspense, useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   ChevronLeft,
   LayoutDashboard,
+  LogOut,
   Menu,
   Receipt,
   Settings as SettingsIcon,
   Tags,
   Target,
   Upload,
+  UserRound,
   Wallet,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { ThemeToggle } from '@/components/layout/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { TooltipHint } from '@/components/ui/controls';
 import { LoadingState } from '@/components/ui/feedback';
+import { useAuth } from '@/features/auth/auth-provider';
+import { useLogout } from '@/features/auth/queries';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
@@ -28,9 +33,44 @@ const NAV_ITEMS = [
   { to: '/categories', label: 'Categories', icon: Tags, end: false },
   { to: '/import', label: 'Import CSV', icon: Upload, end: false },
   { to: '/settings', label: 'Settings', icon: SettingsIcon, end: false },
+  { to: '/account', label: 'Account', icon: UserRound, end: false },
 ] as const;
 
 const COLLAPSE_KEY = 'spendscope-sidebar-collapsed';
+
+/** Signed-in identity plus a sign-out action for the sidebar footer. */
+function AccountFooter({ collapsed }: { collapsed: boolean }) {
+  const { user } = useAuth();
+  const logout = useLogout();
+  const navigate = useNavigate();
+
+  async function onSignOut() {
+    await logout.mutateAsync();
+    toast.success('Signed out');
+    navigate('/sign-in', { replace: true });
+  }
+
+  return (
+    <div className={cn('flex flex-col gap-2 border-t border-border pt-3', collapsed && 'items-center')}>
+      {collapsed ? null : (
+        <p className="truncate px-1 text-xs text-muted-foreground" title={user?.email}>
+          {user?.name ?? user?.email}
+        </p>
+      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        className={cn('justify-center', collapsed && 'px-2')}
+        onClick={() => void onSignOut()}
+        disabled={logout.isPending}
+        aria-label="Sign out"
+      >
+        <LogOut className="size-4" aria-hidden="true" />
+        {collapsed ? null : <span>Sign out</span>}
+      </Button>
+    </div>
+  );
+}
 
 function Brand({ collapsed = false }: { collapsed?: boolean }) {
   return (
@@ -133,6 +173,7 @@ export function AppShell() {
           <ChevronLeft className={cn('size-4 transition-transform', collapsed && 'rotate-180')} />
           {collapsed ? null : <span>Collapse</span>}
         </Button>
+        <AccountFooter collapsed={collapsed} />
       </aside>
 
       {mobileOpen ? (
@@ -151,6 +192,7 @@ export function AppShell() {
               </Button>
             </div>
             <NavList collapsed={false} onNavigate={() => setMobileOpenPath(null)} />
+            <AccountFooter collapsed={false} />
           </div>
         </div>
       ) : null}
@@ -176,8 +218,8 @@ export function AppShell() {
 
         <footer className="border-t border-border px-4 py-4 text-xs text-muted-foreground sm:px-6 lg:px-8">
           <p>
-            SpendScope runs entirely on your machine. Data stays in your local PostgreSQL database; nothing is sent
-            to external services.
+            SpendScope stores your data in your own database and never sends it to a third-party analytics or
+            aggregation service.
           </p>
         </footer>
       </div>

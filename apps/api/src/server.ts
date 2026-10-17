@@ -1,28 +1,49 @@
 import { createApp } from './app.ts';
-import { env } from './config/env.ts';
+import { assertProductionConfiguration, env } from './config/env.ts';
 import { logger } from './lib/logger.ts';
 import { prisma } from './lib/prisma.ts';
+import { pruneExpiredSessions } from './modules/auth/auth.service.ts';
 import { ensureWorkspace } from './modules/workspace/workspace.service.ts';
 
 /**
- * Entry point. Bootstraps the default workspace (idempotently) before listening
- * so the first request already has a workspace, categories and settings.
+ * Entry point.
+ *
+ * Startup order matters: the production configuration guard runs first and
+ * fails fast, then the database is touched. A workspace is only bootstrapped
+ * when explicitly enabled (`BOOTSTRAP_DEFAULT_WORKSPACE`), so a production
+ * installation never contains an automatically created, unowned workspace.
  */
 async function main(): Promise<void> {
+  assertProductionConfiguration();
+
   const app = createApp();
 
   try {
-    const workspace = await ensureWorkspace();
-    logger.info(
-      { workspaceId: workspace.id, created: workspace.created },
-      'workspace ready',
-    );
+    if (env.BOOTSTRAP_DEFAULT_WORKSPACE) {
+      const workspace = await ensureWorkspace();
+      logger.info({ workspaceId: workspace.id, created: workspace.created }, 'default workspace ready');
+    }
   } catch (error) {
     logger.error({ err: error }, 'failed to bootstrap workspace — is the database migrated?');
     process.exitCode = 1;
     await prisma.$disconnect();
     return;
   }
+
+  // Remove sessions that expired while the process was down, then keep pruning.
+  try {
+    const removed = await pruneExpiredSessions();
+    if (removed > 0) logger.info({ removed }, 'pruned expired sessions');
+  } catch (error) {
+    logger.warn({ err: error }, 'could not prune expired sessions at startup');
+  }
+  const pruneTimer = setInterval(
+    () => {
+      void pruneExpiredSessions().catch((error: unknown) => logger.warn({ err: error }, 'session prune failed'));
+    },
+    60 * 60 * 1000,
+  );
+  pruneTimer.unref?.();
 
   const server = app.listen(env.PORT, () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'SpendScope API listening');

@@ -1,4 +1,4 @@
-import request from 'supertest';
+import { api } from './helpers/api.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.ts';
@@ -13,14 +13,14 @@ interface CategoryRef {
 }
 
 async function categoryId(name: string): Promise<string> {
-  const response = await request(app).get('/api/v1/categories').expect(200);
+  const response = await api(app).get('/api/v1/categories').expect(200);
   const match = (response.body.data as CategoryRef[]).find((category) => category.name === name);
   if (!match) throw new Error(`Category "${name}" not found`);
   return match.id;
 }
 
 async function createSample(overrides: Record<string, unknown> = {}) {
-  const response = await request(app)
+  const response = await api(app)
     .post('/api/v1/transactions')
     .send({
       transactionDate: '2026-03-01',
@@ -55,7 +55,7 @@ describe('POST /api/v1/transactions', () => {
   });
 
   it('rejects an invalid body with structured issues', async () => {
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/transactions')
       .send({ transactionDate: '2026-13-40', description: '', amount: '-5', type: 'NOPE' })
       .expect(400);
@@ -66,7 +66,7 @@ describe('POST /api/v1/transactions', () => {
   });
 
   it('rejects an amount with more than two decimals', async () => {
-    await request(app)
+    await api(app)
       .post('/api/v1/transactions')
       .send({ transactionDate: '2026-03-01', description: 'Rounding', amount: '12.345', type: 'EXPENSE' })
       .expect(400);
@@ -74,7 +74,7 @@ describe('POST /api/v1/transactions', () => {
 
   it('rejects a category whose kind does not match the transaction type', async () => {
     const salaryId = await categoryId('Salary');
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-01',
@@ -90,7 +90,7 @@ describe('POST /api/v1/transactions', () => {
 
   it('refuses to categorise a transfer', async () => {
     const groceriesId = await categoryId('Groceries');
-    const response = await request(app)
+    const response = await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-01',
@@ -105,7 +105,7 @@ describe('POST /api/v1/transactions', () => {
   });
 
   it('returns 404 for an unknown category', async () => {
-    await request(app)
+    await api(app)
       .post('/api/v1/transactions')
       .send({
         transactionDate: '2026-03-01',
@@ -128,37 +128,37 @@ describe('GET /api/v1/transactions', () => {
   });
 
   it('paginates with a stable envelope', async () => {
-    const response = await request(app).get('/api/v1/transactions').expect(200);
+    const response = await api(app).get('/api/v1/transactions').expect(200);
     expect(response.body).toMatchObject({ page: 1, pageSize: 25, total: 3, totalPages: 1 });
     expect(response.body.data).toHaveLength(3);
   });
 
   it('filters by type and category', async () => {
-    const income = await request(app).get('/api/v1/transactions?type=INCOME').expect(200);
+    const income = await api(app).get('/api/v1/transactions?type=INCOME').expect(200);
     expect(income.body.data).toHaveLength(1);
     expect(income.body.data[0].description).toBe('Salary March');
 
-    const uncategorized = await request(app)
+    const uncategorized = await api(app)
       .get('/api/v1/transactions?categoryId=uncategorized')
       .expect(200);
     expect(uncategorized.body.data).toHaveLength(2);
   });
 
   it('searches descriptions and merchants case-insensitively', async () => {
-    const response = await request(app).get('/api/v1/transactions?search=goil').expect(200);
+    const response = await api(app).get('/api/v1/transactions?search=goil').expect(200);
     expect(response.body.data).toHaveLength(1);
     expect(response.body.data[0].description).toBe('Fuel');
   });
 
   it('filters by amount range', async () => {
-    const response = await request(app)
+    const response = await api(app)
       .get('/api/v1/transactions?minAmount=100&maxAmount=200')
       .expect(200);
     expect(response.body.data).toHaveLength(2);
   });
 
   it('rejects a bad page size', async () => {
-    await request(app).get('/api/v1/transactions?pageSize=1000').expect(400);
+    await api(app).get('/api/v1/transactions?pageSize=1000').expect(400);
   });
 });
 
@@ -170,30 +170,30 @@ describe('GET/PATCH/DELETE /api/v1/transactions/:id', () => {
   it('reads, updates and deletes a transaction', async () => {
     const created = await createSample();
 
-    const read = await request(app).get(`/api/v1/transactions/${created.id}`).expect(200);
+    const read = await api(app).get(`/api/v1/transactions/${created.id}`).expect(200);
     expect(read.body.data.id).toBe(created.id);
 
-    const updated = await request(app)
+    const updated = await api(app)
       .patch(`/api/v1/transactions/${created.id}`)
       .send({ amount: '99.99', reviewStatus: 'REVIEWED' })
       .expect(200);
     expect(updated.body.data).toMatchObject({ amount: '99.99', reviewStatus: 'REVIEWED' });
 
-    await request(app).delete(`/api/v1/transactions/${created.id}`).expect(204);
-    await request(app).get(`/api/v1/transactions/${created.id}`).expect(404);
+    await api(app).delete(`/api/v1/transactions/${created.id}`).expect(204);
+    await api(app).get(`/api/v1/transactions/${created.id}`).expect(404);
   });
 
   it('rejects an empty patch body', async () => {
     const created = await createSample();
-    await request(app).patch(`/api/v1/transactions/${created.id}`).send({}).expect(400);
+    await api(app).patch(`/api/v1/transactions/${created.id}`).send({}).expect(400);
   });
 
   it('rejects a malformed id', async () => {
-    await request(app).get('/api/v1/transactions/not-a-uuid').expect(400);
+    await api(app).get('/api/v1/transactions/not-a-uuid').expect(400);
   });
 
   it('returns 404 for a valid but unknown id', async () => {
-    await request(app)
+    await api(app)
       .get('/api/v1/transactions/00000000-0000-4000-8000-000000000000')
       .expect(404);
   });
