@@ -28,7 +28,11 @@ every uploaded file, and every restored backup document.
   (`timingSafeEqual`).
 - Sessions are opaque 256-bit random tokens. **Only the SHA-256 hash of a token
   is stored**, so a database dump does not yield a usable session. The token is
-  delivered in an `HttpOnly`, `SameSite=Lax` cookie, `Secure` in production.
+  delivered in an `HttpOnly` cookie with `SameSite=Lax` (configurable through
+  `SESSION_COOKIE_SAME_SITE`) and `Secure` in production. A `SameSite=None`
+  setting is refused at startup unless the cookie is also `Secure`, because
+  browsers discard that combination — it would look like "login succeeds but the
+  session never sticks".
 - Sessions have an expiry (`SESSION_TTL_HOURS`, default 30 days), a `lastUsedAt`
   timestamp and the recording user agent. Users can list and revoke sessions
   (`GET /auth/sessions`, `DELETE /auth/sessions/:id`), and changing a password
@@ -53,17 +57,28 @@ every uploaded file, and every restored backup document.
 
 ### CSRF
 
-Layered defences: `SameSite=Lax` cookies, an `Origin`/`Referer` check on every
-state-changing request (`middleware/csrf.ts`, returns `403`), and CORS configured
-with `credentials: false`. A foreign origin receives no CORS headers **and** a
-clean `403` rather than an error.
+Layered defences: `SameSite=Lax` cookies (the default), an `Origin`/`Referer`
+check on every state-changing request (`middleware/csrf.ts`, returns `403`), and
+CORS restricted to the origins in `CORS_ORIGIN`. A foreign origin receives no
+CORS headers **and** a clean `403` rather than an error.
+
+When the SPA is served from a different origin than the API, CORS sends
+`Access-Control-Allow-Credentials: true` **for allow-listed origins only** — never
+for `*` — and the SPA calls the API with `credentials: 'include'`. The origin
+allow-list is still enforced by the origin callback on every request, and
+`requireTrustedOrigin` re-checks it on state-changing requests, so a misconfigured
+or hostile origin cannot ride the credential allowance. On the recommended
+single-origin deployment (the web service proxies `/api`) none of this is
+exercised by the browser at all.
 
 ### HTTP hardening
 
 - `helmet` with defaults (HSTS, `nosniff`, `Referrer-Policy`, frameguard) and
   `crossOriginResourcePolicy: same-site`. CSP is disabled on the API because it
-  serves JSON and CSV, and set for the SPA by nginx
-  (`apps/web/security-headers.inc`).
+  serves JSON and CSV. The SPA's security headers and CSP come from
+  `apps/web/security-headers.inc` (nginx) or, on a platform without a web server,
+  from `apps/web/server.mjs`, which emits the same values and widens `connect-src`
+  only when `CSP_CONNECT_SRC` lists the API origin.
 - `x-powered-by` disabled. `trust proxy` is configurable (`TRUST_PROXY`) so client
   IPs are correct behind a proxy without letting a direct caller spoof
   `X-Forwarded-For`.
@@ -134,9 +149,18 @@ Zod schema before any row is written.
   request id and duration. **Request and response bodies are never logged**, so
   descriptions, merchants and amounts do not enter the log stream. Health checks
   are excluded from access logging to keep the noise down.
+- The redaction rule list is exported as `REDACT_PATHS` and asserted by a unit
+  test. It covers the request and response `Cookie`/`Set-Cookie` headers as well as
+  the financial fields: the session token is issued in `Set-Cookie`, and logging
+  response headers without that rule writes a live session to the log sink. This
+  was found by the Railway topology smoke test and fixed
+  (`docs/PRODUCTION_TEST_REPORT.md`).
+- The web server logs one JSON line per request — method, path (never the query
+  string, which can contain user-entered search terms), status and duration. It
+  logs no header values and no bodies.
 - There is no telemetry, no analytics, no crash reporting and no third-party API
-  call at runtime. The SPA's CSP allows `connect-src 'self'` only, which keeps it
-  that way.
+  call at runtime. The SPA's CSP allows `connect-src 'self'` by default, and is
+  widened only for an explicitly configured API origin, which keeps it that way.
 - Pending import previews — which do contain financial rows — are stored in the
   `ImportPreview` table, scoped to a workspace, with a TTL (default 30 minutes)
   and a cap of 25 per workspace. Expired rows are swept at startup and hourly.
@@ -226,6 +250,7 @@ merges or deletes rows on its own.
 | Ambiguous `DD/MM` dates are parsed day-first | Data-correctness trade-off; documented in `docs/DECISIONS.md` |
 | A wrong or stale exchange rate would corrupt totals | Eliminated by design: conversion is disabled and foreign rows are excluded instead |
 | `style-src 'unsafe-inline'` in the SPA CSP | Required by the charting library; no inline script is allowed |
+| Serving the SPA from a different origin than the API weakens CSRF defence | Only needed for two public domains; mitigated by the origin check on state-changing requests plus `SameSite=None; Secure`, and avoidable by proxying `/api` from the web service |
 
 ## Dependency audit
 
@@ -241,7 +266,8 @@ tokens or connection strings in a report.
 ## Hardening checklist before any non-loopback deployment
 
 1. Serve over HTTPS and set `HSTS` at the TLS terminator.
-2. Set `SESSION_COOKIE_SECURE=true`, an HTTPS `CORS_ORIGIN`, and keep
+2. Set `SESSION_COOKIE_SECURE=true`, an HTTPS `CORS_ORIGIN`, keep
+   `SESSION_COOKIE_SAME_SITE=lax` (one origin, or matching subdomains), and keep
    `BOOTSTRAP_DEFAULT_WORKSPACE=false`.
 3. Use a managed or least-privilege database role — not `postgres`, and not trust
    auth. Keep the database unreachable from the internet.

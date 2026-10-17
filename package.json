@@ -17,6 +17,7 @@
     "dev:web": "npm run dev --workspace @spendscope/web",
     "build": "npm run build --workspace @spendscope/api && npm run build --workspace @spendscope/web",
     "start": "npm run start --workspace @spendscope/api",
+    "start:web": "node apps/web/server.mjs",
     "test": "npm run test --workspaces --if-present",
     "test:watch": "npm run test:watch --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @spendscope/web",

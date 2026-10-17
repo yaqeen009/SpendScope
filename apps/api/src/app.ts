@@ -27,10 +27,10 @@ import { transactionsRouter } from './modules/transactions/transactions.routes.t
  *
  * Security posture:
  *   - CORS is restricted to the configured frontend origin(s); credentials are
- *     never sent cross-origin.
+ *     only ever allowed for those origins, never for `*`.
  *   - `helmet` safe defaults (CSP disabled: the API serves JSON/CSV, not HTML).
- *   - Session cookie authentication (`HttpOnly`, `SameSite=Lax`, `Secure` in
- *     production) resolved once per request by `attachSession`.
+ *   - Session cookie authentication (`HttpOnly`, `SameSite=Lax` by default and
+ *     `Secure` in production) resolved once per request by `attachSession`.
  *   - An origin check on state-changing requests (CSRF defence in depth).
  *   - Every data route requires an authenticated session and is scoped to the
  *     workspace that session owns.
@@ -60,7 +60,14 @@ export function createApp(): Express {
         callback(null, !origin || env.corsOrigins.includes(origin));
       },
       methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-      credentials: false,
+      // The session is a cookie, so a cross-origin frontend (a separate host
+      // from the API) can only authenticate when credentials are allowed.
+      // This is never `*`: the origin callback above still allow-lists every
+      // origin, so only the configured frontend receives these headers, and
+      // `requireTrustedOrigin` re-checks the origin on every state-changing
+      // request. When the SPA and the API share one origin (the recommended
+      // deployment) this setting is simply never exercised.
+      credentials: env.corsOrigins.length > 0,
       maxAge: 86_400,
     }),
   );

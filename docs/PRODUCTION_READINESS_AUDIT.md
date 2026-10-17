@@ -105,6 +105,9 @@ Baseline is green. Every subsequent change must keep it green.
 - No cloud provider account, database URL, domain, or secret manager is configured in this environment.
 - No `.env` production values exist; only local development values.
 - No GitHub remote credentials are needed for a workflow file, but **no deployment target is authorised**.
+- Railway is the initial hosting target and its guide is written
+  (`docs/DEPLOYMENT.md` §"Deploying to Railway"), but no Railway account, project
+  or billing authorization exists, so no service has been created.
 
 **Consequence:** deployment (Phase 12) and the public smoke test (Phase 13) are **BLOCKED**
 pending explicit authorization and credentials. All local preparation, tests, CI, and
@@ -324,13 +327,13 @@ Statuses: **PASS** = implemented and verified with evidence. **FAIL** = verifica
 | -- | ----------- | ------ | -------- |
 | P-1 | Architecture selected and documented | **PASS** | `docs/DEPLOYMENT.md`: same-origin nginx + API container + managed PostgreSQL, with two alternatives evaluated |
 | P-2 | Deployment artefacts | **PASS (written) / BLOCKED (unbuilt)** | both Dockerfiles, compose stack, nginx config; **Docker is not installed here, so no image was built or run** |
-| P-3 | Production frontend calls the correct backend URL | **PASS** | same-origin `/api` via nginx proxy; `VITE_API_URL` unset by default |
+| P-3 | Production frontend calls the correct backend URL | **PASS** | same-origin `/api` via the proxy; `VITE_API_URL` unset by default. Verified through `apps/web/server.mjs` with `API_INTERNAL_URL` set, and through the nginx image |
 | P-4 | No hardcoded localhost production URLs | **PASS** | `CORS_ORIGIN`, `DATABASE_URL` and the API base come from configuration; the assertion in P-3 is what makes the default safe |
 | P-5 | Debug endpoints and development tools not exposed | **PASS** | no debug route exists; the generated Prisma client is git-ignored and not served; the reset endpoint requires `RESET` and a session |
 | P-6 | Demo data never inserted automatically | **PASS** | guard requires `BOOTSTRAP_DEFAULT_WORKSPACE=false`; verified on a clean database (smoke test step on the empty database) |
 | P-7 | Production build contains no development secrets | **PASS** | Vite inlines only `VITE_*` variables; none hold secrets; the API bundle reads configuration at runtime |
 | P-8 | Health and readiness behave as documented | **PASS** | verified in the smoke test and on a clean database |
-| P-9 | Production-shaped end-to-end run | **PASS (local)** | 16 verified behaviours against a restored database with `NODE_ENV=production` and the guard active |
+| P-9 | Production-shaped end-to-end run | **PASS (local)** | 16 verified behaviours against a restored database with `NODE_ENV=production` and the guard active; then 36 further checks against the Railway topology (below) |
 | P-10 | Deployed application over HTTPS, public URLs | **BLOCKED** | no provider, domain, database or credential was provided, and provisioning incurs cost without authorization |
 | P-11 | Public smoke test with a safe test account | **BLOCKED** | depends on P-10 |
 | P-12 | Deployment remains functional after a restart | **PASS (local)** | the API was killed with `SIGKILL` and restarted against the same database; the same session cookie still authenticated (`/auth/me` → `200`) and previously written rows were present. Sessions, previews and import idempotency live in the database, not in process memory |
@@ -373,4 +376,24 @@ schema, tests, configuration guardrails, CI definition and documentation are
 complete, and everything that can be verified on this machine was verified. It is
 **not deployed**, and no claim is made that it is, because the deployment and
 public smoke test are blocked on authorization and credentials. The exact
-remaining steps are in `docs/DEPLOYMENT.md` §"Remaining manual steps".
+remaining steps are in `docs/DEPLOYMENT.md` §"Deploying to Railway".
+
+## L. Phase 15 — Railway preparation re-check
+
+The repository was prepared for Railway as the initial hosting target: two
+services (`web` public, `api` private) plus the Postgres plugin, with
+`apps/web/server.mjs` proxying `/api` so the browser sees one origin. The
+preparation was verified by running that exact topology locally with
+`NODE_ENV=production` and the guard active: **36 checks, 36 passed**, including a
+real CSV import round trip, workspace isolation with a second account, and log
+inspection. Two defects were found by that run and fixed:
+
+| ID | Finding | Severity | Fix | Verified by |
+| -- | ------- | -------- | --- | ----------- |
+| R-1 | The session token was written to the log stream: Pino logs the response headers, and `res.headers["set-cookie"]` carried the live token | **High** — anyone with log access could replay a session | redaction rules now cover request/response `Set-Cookie` and `Cookie`; the rule list is exported as `REDACT_PATHS` and asserted by a unit test | `tests/observability.test.ts` redaction test; the topology run's log check (`grep` for the cookie value → 0 matches) |
+| R-2 | The web server's proxy returned `500` for every proxied request: `writeHead(status, [[k,v],…])` is not a supported header form | **Medium** — the proxy path was broken | headers are set with `setHeader`, which also preserves multiple `Set-Cookie` values | 25 tests in `apps/web/server.test.mjs`, including cookie preservation and body forwarding |
+
+No new **BLOCKED** items were introduced. The environmental blockers are
+unchanged: no Railway account or billing authorization (deployment itself), no
+GitHub runner (CI execution), no Docker on this machine (image build), and no
+managed database (automated backups).

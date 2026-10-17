@@ -1,7 +1,10 @@
 import { api, request } from './helpers/api.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { Writable } from 'node:stream';
+import { pino } from 'pino';
 
 import { createApp } from '../src/app.ts';
+import { REDACT_PATHS } from '../src/lib/logger.ts';
 import { resetDatabase } from './helpers/db.ts';
 
 /**
@@ -47,5 +50,46 @@ describe('request ids', () => {
   it('returns a request id for an unknown endpoint', async () => {
     const response = await api(app).get('/api/v1/nope').expect(404);
     expect(response.body.error.requestId).toBe(response.headers['x-request-id']);
+  });
+});
+
+/**
+ * Log redaction.
+ *
+ * The request-completion line includes the request and response headers. That
+ * makes the session token — issued in `Set-Cookie` — one missing rule away from
+ * being written to the platform's log sink, where anyone with log access could
+ * replay it. This asserts the rules against a real Pino instance rather than
+ * inspecting the list.
+ */
+describe('log redaction', () => {
+  it('never writes a session token, a cookie header or a CSV row to the log', () => {
+    const lines: string[] = [];
+    const capture = new Writable({
+      write(chunk, _encoding, callback) {
+        lines.push(String(chunk));
+        callback();
+      },
+    });
+    const log = pino({ redact: { paths: [...REDACT_PATHS], censor: '[redacted]' } }, capture);
+
+    log.info(
+      {
+        req: { id: 'abc', headers: { cookie: 'spendscope_session=live-session-token', authorization: 'Bearer x' } },
+        res: { statusCode: 201, headers: { 'set-cookie': 'spendscope_session=live-session-token; Path=/; HttpOnly' } },
+        transaction: { description: 'Private merchant', notes: 'private note' },
+        body: { content: 'date,amount\n2026-01-01,10.00' },
+      },
+      'request completed',
+    );
+
+    const output = lines.join('');
+    expect(output).not.toContain('live-session-token');
+    expect(output).not.toContain('Private merchant');
+    expect(output).not.toContain('private note');
+    expect(output).not.toContain('2026-01-01,10.00');
+    expect(output).toContain('[redacted]');
+    // The useful parts of the line survive: an operator can still trace a request.
+    expect(output).toContain('"statusCode":201');
   });
 });

@@ -24,6 +24,15 @@ const booleanish = (defaultValue: boolean) =>
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  /**
+   * Interface the HTTP server binds to. Unset (the default) means "all
+   * interfaces", which is what every host expects: Node binds `::` with
+   * dual-stack when IPv6 is available and `0.0.0.0` otherwise, so both the
+   * IPv4 platform proxy and an IPv6 private network can reach the process.
+   * Set it only to restrict the listener, e.g. `HOST=127.0.0.1` behind a
+   * same-host reverse proxy.
+   */
+  HOST: z.string().trim().min(1).optional(),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).default(5 * 1024 * 1024),
@@ -46,6 +55,21 @@ const envSchema = z.object({
 
   // --- Authentication ------------------------------------------------------
   SESSION_COOKIE_NAME: z.string().trim().min(1).max(64).default('spendscope_session'),
+  /**
+   * `SameSite` attribute of the session cookie.
+   *
+   * `lax` (the default) is correct whenever the SPA and the API share a
+   * registrable domain — including the recommended deployment, where the web
+   * service proxies `/api` to the API, so the browser only ever sees one
+   * origin. `none` is only needed when the SPA is served from a *different*
+   * registrable domain than the API; it requires a `Secure` cookie and it
+   * weakens CSRF defence, so it is deliberately not the default.
+   */
+  SESSION_COOKIE_SAME_SITE: z
+    .string()
+    .optional()
+    .transform((value) => (value === undefined || value === '' ? 'lax' : value.trim().toLowerCase()))
+    .pipe(z.enum(['lax', 'strict', 'none'])),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 365).default(24 * 30),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
   AUTH_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
@@ -85,6 +109,35 @@ const isProduction = data.NODE_ENV === 'production';
 // always wins so a deliberate local override is possible.
 const sessionCookieSecure = data.SESSION_COOKIE_SECURE ?? isProduction;
 
+const SAME_SITE_ATTRIBUTE = { lax: 'Lax', strict: 'Strict', none: 'None' } as const;
+const sessionCookieSameSite = SAME_SITE_ATTRIBUTE[data.SESSION_COOKIE_SAME_SITE];
+
+const sameSiteProblems = incompatibleSameSiteProblems(sessionCookieSameSite, sessionCookieSecure);
+if (sameSiteProblems.length > 0) {
+  throw new Error(
+    `Invalid environment configuration:\n${sameSiteProblems.map((problem) => `  - ${problem}`).join('\n')}`,
+  );
+}
+
+export type SameSiteAttribute = (typeof SAME_SITE_ATTRIBUTE)[keyof typeof SAME_SITE_ATTRIBUTE];
+
+/**
+ * A `SameSite=None` cookie is only stored by browsers when it is also `Secure`;
+ * sending one without `Secure` silently produces a cookie that is discarded, so
+ * the process refuses to start instead of accepting every login and losing it.
+ */
+export function incompatibleSameSiteProblems(
+  sameSite: SameSiteAttribute,
+  secureCookie: boolean,
+): string[] {
+  if (sameSite === 'None' && !secureCookie) {
+    return [
+      'SESSION_COOKIE_SAME_SITE=None requires a Secure session cookie, otherwise browsers discard it. Set SESSION_COOKIE_SECURE=true (the default when NODE_ENV=production).',
+    ];
+  }
+  return [];
+}
+
 export const env = {
   ...data,
   isProduction,
@@ -93,6 +146,7 @@ export const env = {
     .map((origin) => origin.trim())
     .filter(Boolean),
   sessionCookieSecure,
+  sessionCookieSameSite,
 } as const;
 
 export type Env = typeof env;

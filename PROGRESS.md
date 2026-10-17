@@ -435,4 +435,85 @@ test with a test account and record it in `docs/PRODUCTION_TEST_REPORT.md`.
 
 ---
 
+## Phase 15 — Railway deployment preparation
+
+**Goal:** make the repository deployable as separate frontend and API services on
+Railway (web service public, API on the private network), without weakening the
+security model, and document it so a beginner can execute it.
+
+**Decision — deployment shape.** One public origin. `apps/web/server.mjs`
+(dependency-free Node server) serves the built SPA and proxies `/api/*` to the
+API over Railway's private networking (`api.railway.internal`), so the browser
+sees a single origin: the session cookie stays same-site, no CORS is exercised,
+and the API has no public domain. The alternative (two public domains, API
+reachable directly) is supported and documented: CORS now sends credentials for
+allow-listed origins only (never `*`), `SESSION_COOKIE_SAME_SITE` is configurable
+(`none` requires `Secure`, otherwise the browser discards the cookie), and
+`CSP_CONNECT_SRC` widens the SPA's `connect-src`.
+
+**Changes**
+
+- `apps/web/server.mjs` — new production web server: static SPA, SPA fallback,
+  cache control (immutable `/assets/`, `no-store` `index.html`), the nginx
+  security headers, `/health`, optional `/api` proxy, traversal-safe path
+  resolution, `X-Forwarded-For` handling for one trusted hop, gzip, structured
+  access log, graceful shutdown.
+- `apps/web/server.test.mjs` — 25 tests against a real listener: traversal
+  rejection (raw socket, not normalised away by the client), SPA fallback, cache
+  and security headers, 405, proxy cookie/`Set-Cookie` preservation, body
+  forwarding, `502` on an unreachable upstream, `404 NO_API_UPSTREAM`.
+- `apps/api/src/config/env.ts` — `HOST` (optional bind interface) and
+  `SESSION_COOKIE_SAME_SITE`; `SameSite=None` without `Secure` is refused at
+  startup.
+- `apps/api/src/app.ts` — CORS `credentials` allow-listed; comments updated.
+- `apps/api/src/middleware/auth.ts` — cookie uses the configured `SameSite`.
+- `apps/api/src/lib/logger.ts` — **defect fixed**: the session token was written
+  to the log stream via `res.headers["set-cookie"]`; redaction now covers
+  request/response `Set-Cookie` and `Cookie` (list exported as `REDACT_PATHS`,
+  asserted by a unit test).
+- `apps/api/tests/observability.test.ts` — redaction regression test.
+- `apps/api/package.json` — `prisma` moved to `dependencies` (the pre-deploy
+  `migrate deploy` step needs the CLI at runtime).
+- Root `package.json` — `npm run start:web`.
+- `.env.example` — corrected (removed the unused `VITE_API_BASE_URL`, added
+  `HOST`, `SESSION_COOKIE_SAME_SITE`, `API_INTERNAL_URL`, `CSP_CONNECT_SRC`,
+  `HSTS_MAX_AGE`); placeholders only.
+- `docs/DEPLOYMENT.md` — step-by-step Railway guide: project/database creation,
+  per-service settings (root directory, build, start, pre-deploy, healthcheck,
+  watch paths), exact variable blocks, migration behaviour, smoke tests, rollback,
+  backups, the two-public-domains variant, and a troubleshooting table.
+- `docs/SECURITY.md`, `docs/PRODUCTION_TEST_REPORT.md`, `README.md` updated.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npm test` | **311 passed** (shared 28, api 233, web 50) |
+| `npm run typecheck` | clean |
+| `npm run lint` | 0 errors, 19 warnings |
+| `npm run build` | success (API 274 kB, web index 493 kB / 148 kB gzipped) |
+| Railway topology smoke test (local) | **36 checks, 36 passed** |
+| Production guard on an unsafe config | refused to start, all four problems named |
+
+The Railway topology run used the real production build with
+`NODE_ENV=production`, the guard active, real session cookies, a real CSV import
+round trip (preview → commit → 6 rows persisted, replay idempotent) and a
+second account to prove workspace isolation — all through the web origin. It
+found two defects (the session-token log leak above, and `writeHead` rejecting
+an array-of-pairs header list, which turned the proxy into a 500), both fixed
+and re-verified.
+
+**Outcome:** the repository is deployable on Railway as two services plus the
+Postgres plugin, with every setting, variable, command and rollback step
+documented. Nothing has been deployed: no Railway account, project or billing
+authorization exists. The remaining steps are the operator's and are listed in
+`docs/DEPLOYMENT.md` §"Deploying to Railway".
+
+**Next:** create the Railway project and database, set the documented variables
+and commands, confirm `migrate deploy` in the pre-deploy step, generate a domain
+on the web service, then run the smoke test from §6 of the Railway guide and
+record it in `docs/PRODUCTION_TEST_REPORT.md`.
+
+---
+
 <!-- phases appended below as they complete -->

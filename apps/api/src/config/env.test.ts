@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { assertProductionConfiguration, productionConfigProblems, type ProductionConfig } from './env.ts';
+import {
+  assertProductionConfiguration,
+  incompatibleSameSiteProblems,
+  productionConfigProblems,
+  type ProductionConfig,
+} from './env.ts';
 
 /**
  * Production configuration guardrails.
@@ -111,5 +116,24 @@ describe('production configuration guardrails', () => {
         BOOTSTRAP_DEFAULT_WORKSPACE: true,
       }),
     ).toThrowError(/production configuration is unsafe/);
+  });
+});
+
+/**
+ * `SameSite=None` is the only cookie shape that works when the SPA and the API
+ * are on different registrable domains. Browsers silently discard such a cookie
+ * when it is not also `Secure`, which would look like "login succeeds but the
+ * session never sticks", so the combination is refused at startup.
+ */
+describe('session cookie SameSite', () => {
+  it('accepts the default Lax and Strict cookies', () => {
+    expect(incompatibleSameSiteProblems('Lax', false)).toEqual([]);
+    expect(incompatibleSameSiteProblems('Lax', true)).toEqual([]);
+    expect(incompatibleSameSiteProblems('Strict', false)).toEqual([]);
+  });
+
+  it('accepts SameSite=None only with a Secure cookie', () => {
+    expect(incompatibleSameSiteProblems('None', true)).toEqual([]);
+    expect(incompatibleSameSiteProblems('None', false).join('\n')).toContain('SESSION_COOKIE_SECURE=true');
   });
 });

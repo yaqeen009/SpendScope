@@ -142,6 +142,7 @@ fresh database claims the workspace that `db:seed` created (when
 | `npm run dev`        | Start the API and web app together                                  |
 | `npm run build`      | Type-check and production-build the API (tsup) and web (Vite)       |
 | `npm run start`      | Run the built API from `apps/api/dist`                              |
+| `npm run start:web`   | Run the built web app (`apps/web/dist` + `/api` proxy) from the repo root |
 | `npm run typecheck`  | Type-check every workspace                                          |
 | `npm run lint`       | ESLint across the repo                                              |
 | `npm test`           | Run all unit + integration tests (shared, API, web)                 |
@@ -166,7 +167,7 @@ npm run test:e2e                           # Playwright (full stack)
 npm audit --omit=dev                       # dependency check
 ```
 
-**283 tests pass**: shared 28, API 230 (21 files), web 25, plus 7 Playwright
+**311 tests pass**: shared 28, API 233 (21 files), web 50, plus 7 Playwright
 end-to-end tests.
 
 - **Shared** (`packages/shared`): money, date, period and formatting helpers.
@@ -195,7 +196,7 @@ production-shaped smoke test are in
 - [`docs/FINANCIAL_RULES.md`](docs/FINANCIAL_RULES.md) — how every metric is calculated.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — notable design decisions and trade-offs.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — security posture, data inventory and limitations.
-- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — architecture, configuration, migrations, rollback.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — architecture, configuration, migrations, rollback, and a step-by-step Railway deployment guide.
 - [`docs/DATA_BACKUP_AND_RESTORE.md`](docs/DATA_BACKUP_AND_RESTORE.md) — backup policy and the restore drill.
 - [`docs/PRODUCTION_TEST_REPORT.md`](docs/PRODUCTION_TEST_REPORT.md) — executed checks and load timings.
 - [`docs/PRODUCTION_READINESS_AUDIT.md`](docs/PRODUCTION_READINESS_AUDIT.md) — the requirement-by-requirement audit.
@@ -212,4 +213,7 @@ Before exposing it to any network, follow the hardening checklist in
 [`docs/SECURITY.md`](docs/SECURITY.md) and the deployment checklist in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). In particular: serve it over HTTPS,
 use a least-privilege database role, keep `BOOTSTRAP_DEFAULT_WORKSPACE=false`,
-and decide whether public registration stays open.
+and decide whether public registration stays open. Railway is the initial
+hosting target: the step-by-step guide (services, build/start commands,
+variables, migrations, smoke tests, rollback) is in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).

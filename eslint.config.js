@@ -35,8 +35,8 @@ export default tseslint.config(
     },
   },
   {
-    // Backend + shared packages run on Node.
-    files: ['apps/api/**/*.ts', 'packages/**/*.ts', '*.js'],
+    // Backend, shared packages and the Node-side deployment server run on Node.
+    files: ['apps/api/**/*.ts', 'packages/**/*.ts', '*.js', 'apps/web/**/*.mjs'],
     languageOptions: {
       globals: { ...globals.node },
     },

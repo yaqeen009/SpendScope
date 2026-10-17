@@ -1,13 +1,14 @@
 # Production test report
 
 Evidence collected on 2026-10-17 against the repository at the commit
-`chore(production): security hardening, CI, containers, deployment and audit`
-(on top of `42d0f7d`).
+`chore(production): security hardening, CI, containers, deployment and audit`,
+extended by the Railway deployment preparation work described below.
 
 **Verdict:** the application passes every check that can be run on this machine,
 including a production-shaped end-to-end smoke test against a real PostgreSQL
-database. **No public deployment exists, so deployment is unverified and is not
-claimed.** See [Not tested](#not-tested).
+database and a full run of the Railway service topology (web service proxying
+`/api` to the API). **No public deployment exists, so deployment is unverified
+and is not claimed.** See [Not tested](#not-tested).
 
 ## Environment
 
@@ -25,9 +26,9 @@ claimed.** See [Not tested](#not-tested).
 | Suite | Command | Files | Result |
 | ----- | ------- | ----- | ------ |
 | Shared package | `npm test` (workspace `@spendscope/shared`) | 3 | **28 passed** |
-| API unit + integration | `npx vitest run` in `apps/api` (real PostgreSQL) | 21 | **230 passed** |
-| Web component | `npm test` (workspace `@spendscope/web`) | 7 | **25 passed** |
-| **Total** | `npm test` | 31 | **283 passed, 0 failed** |
+| API unit + integration | `npx vitest run` in `apps/api` (real PostgreSQL) | 21 | **233 passed** |
+| Web component | `npm test` (workspace `@spendscope/web`, incl. `server.test.mjs`) | 8 | **50 passed** |
+| **Total** | `npm test` | 32 | **311 passed, 0 failed** |
 | End-to-end (real browser, real API, real database) | `npm run test:e2e` | 2 | **7 passed** |
 
 The API suite runs against a dedicated `TEST_DATABASE_URL` database that is
@@ -115,6 +116,67 @@ node apps/api/dist/server.js
 | 16 | Log content | Access log lines contain only level, code, path, status, message — no description, merchant, amount or cookie value |
 | 17 | Restart durability | The process was killed with `SIGKILL` (no graceful shutdown), a fresh process was started against the same database, and the **same session cookie** returned `200` from `/auth/me` with the previously created row still present (`search=Survives` → the row). The check account was then deleted through `DELETE /auth/me` (`{"workspaces":1}`) |
 
+## Railway service topology smoke test
+
+The Railway deployment shape was exercised locally: two separate processes
+(`api` and `web`), only one public origin, `/api` proxied by the web service
+exactly as `API_INTERNAL_URL` would on Railway. `apps/api/dist/server.js` was
+started with `NODE_ENV=production` and the configuration guard active (the
+deliberate local overrides), and `apps/web/server.mjs` with
+`API_INTERNAL_URL=http://127.0.0.1:4100`. Every request below went through the web
+origin, the way a browser would. The script ran **36 checks, 36 passed**; the
+table records the ones that matter.
+
+```bash
+NODE_ENV=production PORT=4100 HOST=127.0.0.1 \
+DATABASE_URL="postgresql://postgres@localhost:5433/spendscope?schema=public" \
+CORS_ORIGIN="http://127.0.0.1:4101" \
+ALLOW_LOCAL_DATABASE_IN_PRODUCTION=true ALLOW_INSECURE_COOKIES=true \
+SESSION_COOKIE_SECURE=false BOOTSTRAP_DEFAULT_WORKSPACE=false \
+TRUST_PROXY=1 LOG_LEVEL=info \
+node apps/api/dist/server.js
+
+PORT=4101 HOST=127.0.0.1 API_INTERNAL_URL=http://127.0.0.1:4100 \
+HSTS_MAX_AGE=31536000 LOG_LEVEL=info \
+node apps/web/server.mjs
+```
+
+| # | Check | Observed result |
+| - | ----- | --------------- |
+| 1 | Static SPA | `GET /` → `200`, `index.html` served |
+| 2 | Security headers | CSP (`connect-src 'self'`), `X-Content-Type-Options: nosniff`, HSTS all present on every static response |
+| 3 | SPA fallback | `/budgets` → `200 index.html` |
+| 4 | Missing asset | `/assets/nope.js` → `404` (no fallback masking) |
+| 5 | Directory traversal | raw `GET /assets/%2e%2e/%2e%2e/package.json` over a socket → **`404`**; normalised `/assets/../../package.json` serves the SPA shell, never a file outside the root |
+| 6 | Health | `GET /health` → `200 {"status":"ok"}` |
+| 7 | Proxy liveness | `GET /api/v1/health` → `200` through the proxy |
+| 8 | Proxy readiness | `GET /api/v1/health/ready` → `200`, `database: "up"` |
+| 9 | Anonymous read | `GET /api/v1/transactions` → `401` with `requestId` in the body |
+| 10 | CSRF | `POST /api/v1/categories` with `Origin: https://evil.example` → **`403`**, nothing written |
+| 11 | Registration | `POST /api/v1/auth/register` → `201`; the response `Set-Cookie` survived the proxy as its own header, `HttpOnly`, `SameSite=Lax` |
+| 12 | Session | authenticated `GET /api/v1/transactions` → `200` |
+| 13 | Workspace isolation | a second registered account cannot see the first account's category |
+| 14 | Forwarded address | the API saw exactly one `X-Forwarded-For` entry equal to the real client address, so `TRUST_PROXY=1` is correct behind the web proxy |
+| 15 | Request id | `x-request-id` echoed through the proxy |
+| 16 | CSV import | template downloaded through the proxy → preview → commit → `created: 6` → the 6 rows readable afterwards |
+| 17 | Import idempotency | replaying the same committed preview left the count at 6 — no duplicate rows |
+| 18 | Startup mode | the web server logged `single-origin (proxying /api)`; the API logged `env: "production"` |
+| 19 | No demo data | no `default workspace ready` line: `BOOTSTRAP_DEFAULT_WORKSPACE=false` held |
+| 20 | Log content | the API log contains no password, no cookie value, no category name, no transaction description |
+
+Two defects were found and fixed by this run:
+
+1. **Session token in the request log.** Pino logs the response headers, so
+   `res.headers["set-cookie"]` wrote the live session token to the log sink —
+   anyone with log access could replay a session. Fixed by adding
+   `res.headers["set-cookie"]`, `req.headers["set-cookie"]` and the matching
+   wildcard paths to the redaction rules, exporting the rule list as
+   `REDACT_PATHS` so a regression test can assert it, and adding a unit test
+   that logs a realistic completion line and asserts no token survives.
+2. **Method error on the web server.** `writeHead(status, [[k,v],…])` is not a
+   supported form (header arrays must be flat); the proxy now uses
+   `setHeader`, which also preserves multiple `Set-Cookie` values correctly.
+
 ## Performance and load
 
 Workload: **50,000 transactions** in one workspace (a realistic multi-year
@@ -185,6 +247,7 @@ origin, and the two documented local overrides.
 | ---------- | --- | ----------- |
 | A public deployment over HTTPS | No provider, domain, database or deployment credential was provided, and provisioning incurs cost without authorization | Deployment is **unverified**. No production URL exists. |
 | The production smoke test from `PRODUCTION_READINESS.md` §15 against public URLs | Same | Same |
+| A Railway deployment itself (services, pre-deploy migration, public domain) | No Railway account, project or billing authorization | The topology is verified locally (section above); the platform steps are documented but unexecuted |
 | GitHub Actions CI execution | No GitHub remote or runner | CI is configured but has never run |
 | Docker image build and compose stack | Docker is not installed on this machine | Image build unverified |
 | Managed-database automated backups and point-in-time recovery | No managed database exists | The local restore drill proves the procedure, not the platform's backup feature |
@@ -199,13 +262,16 @@ npm ci
 npm run db:generate
 npm run db:deploy            # migrations on the development database
 npm run db:test:deploy       # migrations on the isolated test database
-npm test                     # 283 tests
+npm test                     # 311 tests
 npm run typecheck
 npm run lint
 npm run build
 npm run test:e2e             # 7 browser tests
 npm audit --omit=dev
 ```
+
+The web service is a dependency-free Node server; run it with
+`npm run start:web` (needs `API_INTERNAL_URL` when the API is on another host).
 
 The production-shaped smoke test and the 50,000-row load test need a scratch
 database; the exact commands are in the two sections above and in

@@ -34,7 +34,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // The production web server is plain Node, so its tests declare
+    // `@vitest-environment node` and live next to the file they exercise.
+    include: ['src/**/*.test.{ts,tsx}', 'server.test.mjs'],
     css: false,
     restoreMocks: true,
   },

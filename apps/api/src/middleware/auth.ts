@@ -25,7 +25,7 @@ function baseCookieOptions() {
     path: '/',
     httpOnly: true,
     secure: env.sessionCookieSecure,
-    sameSite: 'Lax' as const,
+    sameSite: env.sessionCookieSameSite,
   };
 }
 

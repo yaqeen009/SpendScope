@@ -10,7 +10,9 @@ afterEach(() => {
 
 // jsdom does not implement matchMedia, which the theme provider and several
 // components consult. Provide a minimal, controllable stub.
-if (!window.matchMedia) {
+// The guard keeps this file safe for the Node-environment tests (`server.test.mjs`),
+// where `window` does not exist at all.
+if (typeof window !== 'undefined' && !window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: (query: string): MediaQueryList =>
@@ -39,6 +41,6 @@ if (!('ResizeObserver' in globalThis)) {
 }
 
 // Radix and the charts read these on mount.
-if (!window.HTMLElement.prototype.scrollIntoView) {
+if (typeof window !== 'undefined' && !window.HTMLElement.prototype.scrollIntoView) {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 }

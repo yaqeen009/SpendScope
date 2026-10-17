@@ -52,9 +52,16 @@ async function main(): Promise<void> {
   );
   pruneTimer.unref?.();
 
-  const server = app.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'SpendScope API listening');
-  });
+  const server = env.HOST
+    ? app.listen(env.PORT, env.HOST, () => {
+        logger.info({ port: env.PORT, host: env.HOST, env: env.NODE_ENV }, 'SpendScope API listening');
+      })
+    : // No host given: bind every interface. Node picks `::` (dual-stack) when
+      // IPv6 is available, so both the platform's IPv4 proxy and an IPv6
+      // private network can reach the process.
+      app.listen(env.PORT, () => {
+        logger.info({ port: env.PORT, env: env.NODE_ENV }, 'SpendScope API listening');
+      });
 
   // Explicit timeouts. Without them a stalled client or a slow CSV parse can hold
   // a connection open indefinitely, and an idle keep-alive connection can outlive
