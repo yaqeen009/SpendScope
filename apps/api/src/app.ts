@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Express } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import { randomUUID } from 'node:crypto';
 import { pinoHttp } from 'pino-http';
 
 import { env } from './config/env.ts';
@@ -67,6 +68,16 @@ export function createApp(): Express {
   app.use(
     pinoHttp({
       logger,
+      // Observability: every request carries an id. An inbound `x-request-id`
+      // from a trusted edge proxy is reused so a trace spans both layers;
+      // otherwise one is generated. The id is echoed in the response and logged
+      // with the request, so a user can quote it in a bug report.
+      genReqId(req, res) {
+        const inbound = req.headers['x-request-id'];
+        const id = typeof inbound === 'string' && /^[\w.:-]{1,128}$/.test(inbound) ? inbound : randomUUID();
+        res.setHeader('x-request-id', id);
+        return id;
+      },
       autoLogging: {
         ignore: (req) => req.url === '/api/v1/health' || req.url === '/api/v1/ready',
       },

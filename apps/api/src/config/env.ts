@@ -102,33 +102,56 @@ function isLoopback(url: string): boolean {
 }
 
 /**
+ * The parts of the configuration the production guard inspects.
+ *
+ * Narrowing the parameter keeps the guard a pure function, so its rules can be
+ * unit tested without mutating `process.env`.
+ */
+export interface ProductionConfig {
+  isProduction: boolean;
+  corsOrigins: readonly string[];
+  DATABASE_URL: string;
+  sessionCookieSecure: boolean;
+  ALLOW_LOCAL_DATABASE_IN_PRODUCTION: boolean;
+  ALLOW_INSECURE_COOKIES: boolean;
+  BOOTSTRAP_DEFAULT_WORKSPACE: boolean;
+}
+
+/**
  * True when the operator has explicitly acknowledged every production override
  * (local database, insecure cookies, local origin). Such a run is treated as a
  * deliberate local, production-shaped environment.
  */
-function acknowledgedLocalRun(): boolean {
+function acknowledgedLocalRun(config: ProductionConfig): boolean {
   return (
-    env.ALLOW_LOCAL_DATABASE_IN_PRODUCTION &&
-    env.ALLOW_INSECURE_COOKIES &&
-    env.corsOrigins.length > 0 &&
-    env.corsOrigins.every((origin) => isLoopback(origin))
+    config.ALLOW_LOCAL_DATABASE_IN_PRODUCTION &&
+    config.ALLOW_INSECURE_COOKIES &&
+    config.corsOrigins.length > 0 &&
+    config.corsOrigins.every((origin) => isLoopback(origin))
   );
 }
 
 /**
- * Production configuration guardrails. Runs once at startup and throws with an
- * actionable message rather than letting an insecure configuration serve
- * financial data. Each check has a documented, explicit override.
+ * Production configuration guardrails, as a list of problems.
+ *
+ * An empty list means the configuration is safe to serve financial data. Every
+ * check has a documented, explicit override so a local production-shaped run is
+ * possible without weakening the real checks.
  */
-export function assertProductionConfiguration(): void {
-  if (!isProduction) return;
+export function productionConfigProblems(config: ProductionConfig = env): string[] {
+  if (!config.isProduction) return [];
 
   const problems: string[] = [];
+  // An explicitly acknowledged local run relaxes the origin and cookie rules.
+  // The operator has stated in the environment that this is not a real
+  // production deployment, and the acknowledgement is a deliberate act.
+  const acknowledgedLocal = acknowledgedLocalRun(config);
 
-  if (env.corsOrigins.length === 0) {
+  if (config.corsOrigins.length === 0) {
     problems.push('CORS_ORIGIN must list the production frontend origin(s).');
   }
-  for (const origin of env.corsOrigins) {
+  for (const origin of config.corsOrigins) {
+    if (acknowledgedLocal) break;
     if (isLoopback(origin)) {
       problems.push(
         `CORS_ORIGIN still points at a local origin (${origin}). Set the real production origin.`,
@@ -139,24 +162,33 @@ export function assertProductionConfiguration(): void {
     }
   }
 
-  if (isLoopback(env.DATABASE_URL) && !env.ALLOW_LOCAL_DATABASE_IN_PRODUCTION) {
+  if (isLoopback(config.DATABASE_URL) && !config.ALLOW_LOCAL_DATABASE_IN_PRODUCTION) {
     problems.push(
       'DATABASE_URL points at a local database. Set the managed production database URL (or ALLOW_LOCAL_DATABASE_IN_PRODUCTION=true for a deliberate local production-shaped run).',
     );
   }
 
-  if (!sessionCookieSecure && !env.ALLOW_INSECURE_COOKIES) {
+  if (!config.sessionCookieSecure && !config.ALLOW_INSECURE_COOKIES) {
     problems.push(
       'Session cookies must be Secure in production. Set SESSION_COOKIE_SECURE=true (or ALLOW_INSECURE_COOKIES=true for a deliberate local run).',
     );
   }
 
-  if (env.BOOTSTRAP_DEFAULT_WORKSPACE && !acknowledgedLocalRun()) {
+  if (config.BOOTSTRAP_DEFAULT_WORKSPACE && !acknowledgedLocal) {
     problems.push(
       'BOOTSTRAP_DEFAULT_WORKSPACE must be false in production so a demo workspace is never created automatically.',
     );
   }
 
+  return problems;
+}
+
+/**
+ * Throws with an actionable message rather than letting an insecure
+ * configuration serve financial data. Runs once at startup.
+ */
+export function assertProductionConfiguration(config: ProductionConfig = env): void {
+  const problems = productionConfigProblems(config);
   if (problems.length > 0) {
     throw new Error(
       `Refusing to start: production configuration is unsafe.\n${problems.map((p) => `  - ${p}`).join('\n')}`,

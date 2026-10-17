@@ -1,0 +1,93 @@
+# Production-shaped local stack.
+#
+# This is **not** a production deployment. It exists so the real production code
+# path can be exercised end to end on one machine: `NODE_ENV=production`, the
+# production configuration guard active, no demo bootstrap, migrations applied as
+# a separate step, and the SPA served from nginx with `/api` proxied.
+#
+#   docker compose up --build -d
+#   open http://localhost:8080
+#
+# See docs/DEPLOYMENT.md for a real deployment.
+
+name: spendscope
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spendscope
+      # Local-only credential. A real deployment supplies this from a secret
+      # manager, never from a committed file.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_DB: spendscope
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U spendscope -d spendscope']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published: only the API needs to reach the database.
+
+  # One-shot migration job. The API waits for it to finish, so no request is
+  # ever served against an unmigrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://spendscope:${POSTGRES_PASSWORD:-local-development-only}@db:5432/spendscope?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      DATABASE_URL: postgresql://spendscope:${POSTGRES_PASSWORD:-local-development-only}@db:5432/spendscope?schema=public
+      # Same-origin in the browser: nginx proxies /api, so the only origin the
+      # API ever sees is the web container's.
+      CORS_ORIGIN: http://localhost:8080
+      LOG_LEVEL: info
+      # nginx is the single proxy in front of the API.
+      TRUST_PROXY: '1'
+      SESSION_TTL_HOURS: '720'
+      AUTH_RATE_LIMIT_MAX: '20'
+      AUTH_RATE_LIMIT_WINDOW_MINUTES: '15'
+      # No demo workspace: this is the production path, and every real user gets a
+      # workspace created for them on first sign-in.
+      BOOTSTRAP_DEFAULT_WORKSPACE: 'false'
+      # The only two overrides this local stack needs. Both are deliberate and
+      # both are visible in the production configuration guard.
+      ALLOW_LOCAL_DATABASE_IN_PRODUCTION: 'true'
+      ALLOW_INSECURE_COOKIES: 'true'
+      SESSION_COOKIE_SECURE: 'false'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - '8080:80'
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:

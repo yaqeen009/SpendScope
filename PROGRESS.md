@@ -280,4 +280,159 @@ leakage (C-3). Deployment BLOCKED (no credentials/authorization).
 
 ---
 
+## Phase 8 / 10 — Security hardening, observability, performance
+
+**Changes**
+
+- `apps/api/src/config/env.ts` — `assertProductionConfiguration` refactored into a
+  pure `productionConfigProblems(config)` plus the throwing wrapper, so the rules
+  are unit testable. An explicitly acknowledged local run (local DB **and**
+  insecure cookies **and** loopback origins) now relaxes the origin checks, which
+  is what makes a production-shaped local stack possible without weakening the
+  real checks.
+- `apps/api/src/config/env.test.ts` — **new**, 11 unit tests covering every rule
+  and its override.
+- `apps/api/src/app.ts` — request ids: an inbound `x-request-id` is reused when it
+  is a safe token, otherwise a UUID is generated; the id is echoed in the response.
+- `apps/api/src/middleware/validate.ts` — every error body (including `404`, `413`
+  and `500`) now carries `requestId`; 500s log the id alongside the stack. No
+  message, stack or SQL detail is exposed.
+- `apps/api/src/server.ts` — explicit `requestTimeout` (120s), `headersTimeout`
+  (20s) and `keepAliveTimeout` (65s), and `closeIdleConnections()` on shutdown so
+  a rolling deploy can actually drain.
+- `apps/web/security-headers.inc` — **new**: `nosniff`, frameguard,
+  `Referrer-Policy`, `Permissions-Policy` and a strict CSP
+  (`connect-src 'self'`), included at the server level *and* inside every
+  `location` that sets its own `add_header` (nginx discards inherited headers when
+  a location defines one).
+- `docs/SECURITY.md` — rewritten. The previous version documented "no
+  authentication", "no CSRF protection" and "in-memory preview store" as facts;
+  all three are now wrong, so the document was replaced rather than patched, and
+  it now includes the personal-data inventory, the dependency audit and the
+  updated accepted-risk table.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (api) | 226 passed, then 230 after later phases |
+| `npm run typecheck` | clean |
+| `npm audit --omit=dev` | **0 vulnerabilities** |
+| Guard against a real unsafe production config | the built server **refused to start**, naming all four problems |
+| Load check: 50,000 transactions in one workspace | 24-month summary 53 ms, dashboard 36 ms, paged list 10 ms, 50,000-row CSV export 678 ms |
+| Log inspection during the load run | no description, merchant, amount or cookie value in any log line |
+
+**Outcome:** production configuration is fail-fast and tested; every response is
+correlatable; performance is measured rather than asserted. Error monitoring is
+deliberately not configured (it would receive financial context).
+
+---
+
+## Phase 11 / 12 — CI, containers, deployment and backup documentation
+
+**Changes**
+
+- `.github/workflows/ci.yml` — **new**. Lint, typecheck, the full suite against a
+  real PostgreSQL 16 service, test-database creation, migrations on both
+  databases, production build, and a second job that installs Chromium and runs
+  the Playwright suite. No production secret is referenced.
+- `apps/api/Dockerfile` — multi-stage with three targets: `build` (full install,
+  Prisma generate, tsup bundle), `migrate` (one-shot `prisma migrate deploy`), and
+  the non-root `runtime` image with a liveness `HEALTHCHECK`.
+- `apps/web/Dockerfile` — Vite build stage plus nginx serving the SPA and
+  proxying `/api`, the same-origin shape the client expects.
+- `apps/web/nginx.conf` — SPA fallback, immutable asset caching with `no-store`
+  `index.html`, `/api` proxy with forwarded headers and a 12 MB body limit.
+- `docker-compose.yml` — production-shaped local stack: PostgreSQL with a volume,
+  a `migrate` job the API waits for, and `NODE_ENV=production` with only the two
+  documented local overrides. **Not a production deployment.**
+- `.dockerignore` — excludes `node_modules`, build output, `.env` and the local
+  cluster.
+- `docs/DEPLOYMENT.md`, `docs/DATA_BACKUP_AND_RESTORE.md` — **new**.
+- `docs/PRODUCTION_TEST_REPORT.md` — **new**: executed checks, the smoke test
+  table, the load timings, and an explicit list of what was **not** tested.
+- `README.md`, `.env.example` — updated for auth, the new features, the CI and
+  deployment files, and production connection-pool guidance.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| Restore drill: `pg_dump -Fc` → scratch DB → `pg_restore` → compare → boot the API | identical table list (13), identical row counts, `health/ready` → `database: "up"` |
+| `docker --version` | **not installed** — images are written but unbuilt (recorded as unverified) |
+| `npx prisma migrate deploy` against an **empty** database | 9 migrations, 13 tables, `migrate status` → up to date |
+| GitHub Actions | **no runner available** — configure-only, never executed |
+
+**Outcome:** delivery artefacts and procedures are complete and documented; the
+image build and CI execution are explicitly unverified rather than implied.
+
+---
+
+## Phase 13 — Production-shaped smoke test (local)
+
+**Changes**
+
+- `apps/api/src/modules/auth/*`, `packages/shared/src/schemas/auth.ts`,
+  `apps/web/src/features/auth/account-page.tsx` — account deletion now requires
+  the **account password** as well as the `DELETE` token, and the account page
+  has the matching field. Deleting an account is the one irreversible operation in
+  the product; a stolen session cookie alone must not be able to destroy a user's
+  history.
+
+**Checks executed** — the production build, `NODE_ENV=production`, the
+configuration guard active, against a **restored copy** of the database. 16
+behaviours verified; full table in `docs/PRODUCTION_TEST_REPORT.md`. Highlights:
+
+| Check | Result |
+| --- | --- |
+| Unsafe production config | refused to start, all problems named |
+| Liveness / readiness | `200` / `200 database: "up"` |
+| Request id | present on every response; a safe inbound id is echoed |
+| Registration on a clean database with `BOOTSTRAP_DEFAULT_WORKSPACE=false` | the account got its own workspace; nothing was bootstrapped |
+| CSRF | foreign `Origin` → `403`, no row written |
+| Financial integrity | base expense and income counted; the USD row excluded **and reported** in `foreignCurrency` |
+| CSV export | `currency` column resolved (`GHS` / `USD`), `nosniff`, attachment disposition |
+| Anonymous access | `401` with a request id |
+| Sign out | `204`, then the same cookie → `401` |
+| Logs | no financial payload or credential (warnings only: code, path, status) |
+
+**Outcome:** the real production code path works end-to-end locally against real
+data. No public deployment exists, so this is **not** a deployed smoke test.
+
+---
+
+## Phase 14 — Final audit and verification
+
+**Changes**
+
+- `docs/PRODUCTION_READINESS_AUDIT.md` — final requirement-by-requirement audit
+  appended: every finding from section 4 re-checked, plus feature, authentication,
+  security, database, performance, testing, deployment and deferral tables, each
+  with a status, evidence, the command run and the actual result.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npm test` | **283 passed** (shared 28, api 230, web 25) |
+| `npm run test:e2e` | **7 passed** |
+| `npm run typecheck` | clean |
+| `npm run lint` | 0 errors, 19 warnings |
+| `npm run build` | success (API 270 kB bundle, web index 493 kB / 148 kB gzipped) |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+
+**Outcome:** all requirements that can be verified in this environment are
+**PASS** with executed evidence. Outstanding **BLOCKED** items are environmental
+only: no deployment provider, database, domain or credential (public deployment
+and the public smoke test), no GitHub runner (CI execution), no Docker on this
+machine (image build), and no managed-database platform (automated backups).
+Deferred, non-critical items are listed in the audit with their impact.
+
+**Next:** none locally. To finish, follow `docs/DEPLOYMENT.md` §"Remaining manual
+steps" — choose a provider, supply `DATABASE_URL` and `CORS_ORIGIN` from a secret
+store, point a domain at it, run `migrate deploy`, then run the production smoke
+test with a test account and record it in `docs/PRODUCTION_TEST_REPORT.md`.
+
+---
+
 <!-- phases appended below as they complete -->

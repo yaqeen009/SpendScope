@@ -195,8 +195,8 @@ describe('auth: account deletion', () => {
     await resetDatabase();
   });
 
-  it('requires the confirmation token, and a session', async () => {
-    await request(app).delete('/api/v1/auth/me').send({ confirm: 'DELETE' }).expect(401);
+  it('requires the confirmation token, the password, and a session', async () => {
+    await request(app).delete('/api/v1/auth/me').send({ confirm: 'DELETE', password: TEST_USER_PASSWORD }).expect(401);
 
     const login = await request(app)
       .post('/api/v1/auth/login')
@@ -204,8 +204,26 @@ describe('auth: account deletion', () => {
       .expect(200);
     const cookie = cookieOf(login);
 
-    const response = await request(app).delete('/api/v1/auth/me').set('Cookie', cookie).send({ confirm: 'yes' });
-    expect(response.status).toBe(400);
+    const badToken = await request(app)
+      .delete('/api/v1/auth/me')
+      .set('Cookie', cookie)
+      .send({ confirm: 'yes', password: TEST_USER_PASSWORD });
+    expect(badToken.status).toBe(400);
+
+    // The password is required, not just the token.
+    const noPassword = await request(app)
+      .delete('/api/v1/auth/me')
+      .set('Cookie', cookie)
+      .send({ confirm: 'DELETE' });
+    expect(noPassword.status).toBe(400);
+
+    // A wrong password deletes nothing.
+    const wrongPassword = await request(app)
+      .delete('/api/v1/auth/me')
+      .set('Cookie', cookie)
+      .send({ confirm: 'DELETE', password: 'not-the-password' });
+    expect(wrongPassword.status).toBe(401);
+    await request(app).get('/api/v1/auth/me').set('Cookie', cookie).expect(200);
   });
 
   it('deletes the account, its sessions and all of its data', async () => {
@@ -215,19 +233,28 @@ describe('auth: account deletion', () => {
       .expect(201);
     const cookie = cookieOf(registration);
 
-    await request(app)
+    const created = await request(app)
       .post('/api/v1/transactions')
       .set('Cookie', cookie)
       .send({ transactionDate: '2026-03-01', description: 'Temp', amount: '10.00', type: 'EXPENSE' })
       .expect(201);
 
-    await request(app).delete('/api/v1/auth/me').set('Cookie', cookie).send({ confirm: 'DELETE' }).expect(200);
+    await request(app)
+      .delete('/api/v1/auth/me')
+      .set('Cookie', cookie)
+      .send({ confirm: 'DELETE', password: 'a-strong-passw0rd' })
+      .expect(200);
 
     await request(app).get('/api/v1/auth/me').set('Cookie', cookie).expect(401);
     await request(app)
       .post('/api/v1/auth/login')
       .send({ email: 'delete-me@example.test', password: 'a-strong-passw0rd' })
       .expect(401);
+
+    // The workspace and every row it held are gone, not orphaned.
+    const { prisma } = await import('../src/lib/prisma.ts');
+    expect(await prisma.transaction.findUnique({ where: { id: created.body.data.id } })).toBeNull();
+    expect(await prisma.workspace.findMany({ where: { ownerUserId: null } })).toHaveLength(0);
   });
 });
 

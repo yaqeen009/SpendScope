@@ -8,6 +8,7 @@ import {
   loginSchema,
   registerSchema,
   updateProfileSchema,
+  type DeleteAccountInput,
 } from '@spendscope/shared';
 
 import { env } from '../../config/env.ts';
@@ -128,8 +129,8 @@ export function createAuthRouter(): Router {
   /** Irreversible: deletes the account and every workspace it owns. */
   authRouter.delete('/me', requireAuth, validateBody(deleteAccountSchema), async (req, res) => {
     const userId = authOf(res).user.id;
-    const body = req.body as { confirm: string };
-    const result = await deleteAccount(userId, body.confirm);
+    const body = req.body as DeleteAccountInput;
+    const result = await deleteAccount(userId, body);
     clearSessionCookie(res);
     res.json({ data: result });
   });

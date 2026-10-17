@@ -47,6 +47,7 @@ export function AccountPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordDone, setPasswordDone] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function onSignOut() {
@@ -85,7 +86,7 @@ export function AccountPage() {
   async function onDeleteAccount() {
     setDeleteError(null);
     try {
-      await deleteAccount.mutateAsync({ confirm: 'DELETE' });
+      await deleteAccount.mutateAsync({ confirm: 'DELETE', password: deletePassword });
       toast.success('Account deleted');
       navigate('/sign-in', { replace: true });
     } catch (error) {
@@ -245,11 +246,22 @@ export function AccountPage() {
               onChange={(event) => setConfirmText(event.target.value)}
               autoComplete="off"
             />
+            <Label htmlFor="delete-password">Your password</Label>
+            <Input
+              id="delete-password"
+              type="password"
+              value={deletePassword}
+              onChange={(event) => setDeletePassword(event.target.value)}
+              autoComplete="current-password"
+            />
+            <p className="text-muted-foreground text-xs">
+              The password is required so a signed-in browser alone cannot erase your history.
+            </p>
           </div>
           <div>
             <Button
               variant="destructive"
-              disabled={confirmText !== 'DELETE' || deleteAccount.isPending}
+              disabled={confirmText !== 'DELETE' || deletePassword.length === 0 || deleteAccount.isPending}
               onClick={() => void onDeleteAccount()}
             >
               <Trash2 aria-hidden="true" /> Delete my account and data

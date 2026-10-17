@@ -56,8 +56,18 @@ async function main(): Promise<void> {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'SpendScope API listening');
   });
 
+  // Explicit timeouts. Without them a stalled client or a slow CSV parse can hold
+  // a connection open indefinitely, and an idle keep-alive connection can outlive
+  // the proxy in front of it (which produces intermittent 502s).
+  server.requestTimeout = 120_000; // an upload plus parse must finish in two minutes
+  server.headersTimeout = 20_000; // a slow header set is not a real client
+  server.keepAliveTimeout = 65_000; // longer than a typical 60s proxy idle timeout
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down');
+    // Stop accepting new connections, and release idle keep-alive sockets so the
+    // process can actually exit during a rolling deploy.
+    server.closeIdleConnections();
     server.close(async () => {
       await prisma.$disconnect();
       process.exit(0);

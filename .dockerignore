@@ -1,0 +1,25 @@
+# Keep the build context small and reproducible.
+node_modules
+**/node_modules
+
+# Build output is produced inside the image.
+dist
+**/dist
+
+# Never bake environment files or secrets into an image.
+.env
+.env.*
+!.env.example
+
+# Local database cluster and logs.
+.spendscope
+*.log
+
+# Tooling and test output.
+.git
+.github
+**/test-results
+**/playwright-report
+**/coverage
+.DS_Store
+docs/artifacts

@@ -3,6 +3,7 @@ import type {
   AuthStateDTO,
   AuthUserDTO,
   ChangePasswordInput,
+  DeleteAccountInput,
   LoginInput,
   RegisterInput,
   UpdateProfileInput,
@@ -331,11 +332,21 @@ export async function changePassword(
 /**
  * Deletes the account and every workspace it owns. All financial data cascades
  * from the workspace deletions; the user row cascades the sessions.
+ *
+ * Requires the password as well as the confirmation token: this is the one
+ * irreversible operation in the product, and a session cookie alone must not be
+ * enough to destroy a user's history.
  */
-export async function deleteAccount(userId: string, confirm: string): Promise<{ workspaces: number }> {
-  if (confirm !== 'DELETE') {
+export async function deleteAccount(userId: string, input: DeleteAccountInput): Promise<{ workspaces: number }> {
+  if (input.confirm !== 'DELETE') {
     throw new BadRequestError('Confirmation token is incorrect. Type DELETE to confirm.');
   }
+
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+  if (!user) throw new NotFoundError('Account');
+
+  const valid = await verifyPassword(input.password, user.passwordHash);
+  if (!valid) throw new UnauthorizedError('Your password is incorrect, so the account was not deleted');
 
   return prisma.$transaction(async (tx) => {
     const workspaces = await tx.workspace.deleteMany({ where: { ownerUserId: userId } });

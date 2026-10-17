@@ -12,6 +12,27 @@ export function formatZodIssues(error: ZodError): { path: string; message: strin
   }));
 }
 
+/**
+ * The pino request id, so a client can quote it when reporting a problem. Only
+ * the id is exposed — never a message, stack or internal detail.
+ */
+function requestIdOf(req: Request): string | null {
+  const id = (req as Request & { id?: unknown }).id;
+  return typeof id === 'string' || typeof id === 'number' ? String(id) : null;
+}
+
+function errorBody(req: Request, code: string, message: string, details?: unknown) {
+  const requestId = requestIdOf(req);
+  return {
+    error: {
+      code,
+      message,
+      ...(details !== undefined ? { details } : {}),
+      ...(requestId ? { requestId } : {}),
+    },
+  };
+}
+
 function validate<T>(schema: ZodType<T>, value: unknown, label: string): T {
   const result = schema.safeParse(value);
   if (!result.success) {
@@ -85,17 +106,11 @@ export function errorHandler(
 
   if (error instanceof AppError) {
     if (error.status >= 500) {
-      logger.error({ err: error, path: req.path }, 'request failed');
+      logger.error({ err: error, path: req.path, requestId: requestIdOf(req) }, 'request failed');
     } else {
       logger.warn({ code: error.code, path: req.path, status: error.status }, 'request rejected');
     }
-    res.status(error.status).json({
-      error: {
-        code: error.code,
-        message: error.message,
-        ...(error.details !== undefined ? { details: error.details } : {}),
-      },
-    });
+    res.status(error.status).json(errorBody(req, error.code, error.message, error.details));
     return;
   }
 
@@ -105,6 +120,7 @@ export function errorHandler(
         code: 'VALIDATION_ERROR',
         message: 'Request validation failed',
         details: formatZodIssues(error),
+        ...(requestIdOf(req) ? { requestId: requestIdOf(req) } : {}),
       },
     });
     return;
@@ -117,20 +133,14 @@ export function errorHandler(
     'type' in error &&
     (error as { type?: string }).type === 'entity.too.large'
   ) {
-    res.status(413).json({
-      error: { code: 'PAYLOAD_TOO_LARGE', message: 'The uploaded file is too large' },
-    });
+    res.status(413).json(errorBody(req, 'PAYLOAD_TOO_LARGE', 'The uploaded file is too large'));
     return;
   }
 
-  logger.error({ err: error, path: req.path }, 'unhandled error');
-  res.status(500).json({
-    error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' },
-  });
+  logger.error({ err: error, path: req.path, requestId: requestIdOf(req) }, 'unhandled error');
+  res.status(500).json(errorBody(req, 'INTERNAL_ERROR', 'An unexpected error occurred'));
 }
 
-export function notFoundHandler(_req: Request, res: Response): void {
-  res.status(404).json({
-    error: { code: 'NOT_FOUND', message: 'The requested endpoint does not exist' },
-  });
+export function notFoundHandler(req: Request, res: Response): void {
+  res.status(404).json(errorBody(req, 'NOT_FOUND', 'The requested endpoint does not exist'));
 }

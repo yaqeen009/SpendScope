@@ -56,8 +56,14 @@ export const changePasswordSchema = z.object({
 });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
-/** Deletion requires the literal token so a stray request cannot destroy data. */
+/**
+ * Deletion is irreversible and destroys every record in every workspace the
+ * account owns. It therefore requires both the literal confirmation token and
+ * the account password, so a stray request — or one made with a stolen session
+ * cookie alone — cannot erase a user's financial history.
+ */
 export const deleteAccountSchema = z.object({
   confirm: z.literal('DELETE'),
+  password: z.string().min(1, 'Your password is required to delete the account').max(MAX_PASSWORD_LENGTH),
 });
 export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;
