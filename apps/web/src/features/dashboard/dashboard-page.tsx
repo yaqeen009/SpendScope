@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Coins, PiggyBank, Receipt, TrendingDown, Upload, Wallet } from 'lucide-react';
+import { formatCurrency } from '@spendscope/shared';
 
 import { CategoryBreakdownChart } from '@/components/charts/category-breakdown-chart';
 import { IncomeExpenseChart } from '@/components/charts/income-expense-chart';
@@ -23,7 +24,7 @@ import { TRANSACTION_TYPE_LABELS } from '@/lib/format';
 export function DashboardPage() {
   const { period, params, setPeriod } = usePeriod('this_month');
   const query = useDashboard(params);
-  const { formatMoney, formatMonth, formatDate } = useMoney();
+  const { formatMoney, formatMonth, formatDate, locale } = useMoney();
 
   const dashboard = query.data;
 
@@ -85,6 +86,20 @@ export function DashboardPage() {
             <Alert variant="info" title="Sample data is included">
               Some transactions in this workspace are labelled sample data. They are fictional and are excluded from
               nothing — remove them from <Link to="/settings">Settings</Link> once you have imported your own data.
+            </Alert>
+          ) : null}
+
+          {dashboard.summary.current.foreignCurrency.count > 0 ? (
+            <Alert variant="warning" title="Some transactions are in another currency">
+              {dashboard.summary.current.foreignCurrency.count} transaction
+              {dashboard.summary.current.foreignCurrency.count === 1 ? ' is' : 's are'} in{' '}
+              {dashboard.summary.current.foreignCurrency.currencies.join(', ')}. SpendScope does not convert
+              currencies, so those rows are <strong>not included</strong> in the figures below and are not counted in
+              any budget. Excluded:{' '}
+              {dashboard.summary.current.foreignCurrency.totals
+                .map((entry) => `${formatCurrency(entry.expenses, entry.currency, locale)} expenses`)
+                .join(', ')}
+              .
             </Alert>
           ) : null}
 

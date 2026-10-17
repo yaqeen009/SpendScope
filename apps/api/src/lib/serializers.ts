@@ -77,6 +77,8 @@ export interface TransactionRow {
   isSample: boolean;
   refundOfTransactionId: string | null;
   transferGroupId: string | null;
+  /** `null` means the workspace base currency. */
+  currency?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -98,6 +100,7 @@ export function toTransactionDTO(row: TransactionRow, extras: { refundedAmount?:
     isSample: row.isSample,
     refundOfTransactionId: row.refundOfTransactionId,
     transferGroupId: row.transferGroupId,
+    currency: row.currency ?? null,
     ...(extras.refundedAmount ? { refundedAmount: decimalToString(extras.refundedAmount) } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

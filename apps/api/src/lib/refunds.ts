@@ -27,6 +27,13 @@ export type Db = Prisma.TransactionClient | typeof prisma;
 export interface ResolvedRefund {
   refundOfTransactionId: string | null;
   categoryId: string | null;
+  /**
+   * Currency to persist. `null` is the workspace base currency. A linked refund
+   * always takes the original's currency: reversing money in a different
+   * currency is not something this system can represent without conversion.
+   * `undefined` means "the caller did not ask to change it".
+   */
+  currency: string | null | undefined;
 }
 
 /** Sum of the refunds already linked to an original expense. */
@@ -59,6 +66,8 @@ export async function resolveRefundLink(params: {
   amount: string;
   refundOfTransactionId: string | null | undefined;
   categoryId: string | null;
+  /** Desired currency, already normalised (`null` = base currency). */
+  currency: string | null | undefined;
   /** Set when validating an update, so a refund cannot link to itself. */
   selfId?: string;
 }): Promise<ResolvedRefund> {
@@ -66,7 +75,7 @@ export async function resolveRefundLink(params: {
   const { workspaceId, type, amount, refundOfTransactionId, categoryId } = params;
 
   if (refundOfTransactionId === null || refundOfTransactionId === undefined) {
-    return { refundOfTransactionId: null, categoryId };
+    return { refundOfTransactionId: null, categoryId, currency: params.currency };
   }
 
   if (type !== 'REFUND') {
@@ -78,11 +87,20 @@ export async function resolveRefundLink(params: {
 
   const original = await db.transaction.findFirst({
     where: { id: refundOfTransactionId, workspaceId },
-    select: { id: true, type: true, amount: true, categoryId: true, description: true },
+    select: { id: true, type: true, amount: true, categoryId: true, description: true, currency: true },
   });
   if (!original) throw new NotFoundError('Original transaction');
   if (original.type !== 'EXPENSE') {
     throw new BadRequestError('A refund can only reference an EXPENSE transaction');
+  }
+
+  // A refund reverses the original's money, so it must be in the same currency.
+  const originalCurrency = original.currency ?? null;
+  if (params.currency !== undefined && params.currency !== originalCurrency) {
+    throw new BadRequestError(
+      'A linked refund must be in the same currency as the original expense, because SpendScope does not convert currencies',
+      { originalCurrency, refundCurrency: params.currency },
+    );
   }
 
   // Category inheritance is enforced rather than silently applied, so the
@@ -110,5 +128,5 @@ export async function resolveRefundLink(params: {
     );
   }
 
-  return { refundOfTransactionId: original.id, categoryId: original.categoryId };
+  return { refundOfTransactionId: original.id, categoryId: original.categoryId, currency: originalCurrency };
 }

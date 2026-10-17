@@ -135,6 +135,11 @@ export interface TransactionDTO {
   /** Shared id when two rows are a manually paired account transfer. */
   transferGroupId: string | null;
   /**
+   * ISO-4217 code of `amount`, or `null` when the row is in the workspace base
+   * currency. Foreign-currency rows are excluded from aggregated totals.
+   */
+  currency: string | null;
+  /**
    * Only present on `GET /transactions/:id` for EXPENSE rows: the amount already
    * refunded by linked REFUND rows, so a client can prevent over-refunding.
    */
@@ -289,6 +294,21 @@ export interface PeriodMetrics {
   transactionCount: number;
   uncategorizedExpenseTotal: string;
   uncategorizedCount: number;
+  /**
+   * Rows in a currency other than the workspace's base currency. They are NOT
+   * part of the figures above, because SpendScope performs no conversion. The
+   * client must show this so a total is never mistaken for complete.
+   */
+  foreignCurrency: ForeignCurrencyNotice;
+}
+
+/** Foreign-currency rows excluded from a total, and which currencies they are in. */
+export interface ForeignCurrencyNotice {
+  count: number;
+  /** Distinct currency codes seen, sorted. */
+  currencies: string[];
+  /** Per-currency breakdown, so the user can see the size of what was excluded. */
+  totals: { currency: string; income: string; expenses: string; count: number }[];
 }
 
 export interface PeriodChange {

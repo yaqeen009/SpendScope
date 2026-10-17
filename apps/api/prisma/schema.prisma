@@ -85,6 +85,30 @@ model ImportPreview {
   @@index([workspaceId, createdAt])
 }
 
+/// Stored exchange rates. **Reserved and currently unused.**
+///
+/// Conversion is deliberately disabled: a stale or wrong rate would silently
+/// corrupt every total, and the failure would be invisible. Instead,
+/// foreign-currency rows carry their own code and are excluded from aggregates.
+/// This table exists so rates can be recorded and reviewed before conversion is
+/// ever enabled, and so the omission is explicit rather than accidental.
+model ExchangeRate {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @db.Uuid
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fromCurrency String
+  toCurrency   String
+  rate         Decimal   @db.Decimal(18, 8)
+  /// Date the rate applies to.
+  asOf         DateTime  @db.Date
+  /// Where the rate came from, e.g. "manual" or "bank statement".
+  source       String    @default("manual")
+  note         String?
+  createdAt    DateTime  @default(now())
+
+  @@unique([workspaceId, fromCurrency, toCurrency, asOf])
+}
+
 /// A recurring series the user has dismissed.
 ///
 /// Detection is heuristic, so the user can permanently hide a false positive.
@@ -181,6 +205,7 @@ model Workspace {
   categoryRules CategoryRule[]
   importPreviews ImportPreview[]
   recurringDismissals RecurringDismissal[]
+  exchangeRates ExchangeRate[]
 
   @@index([ownerUserId])
 }
@@ -231,6 +256,14 @@ model Transaction {
   /// Both sides of a manually paired account transfer share this id.
   /// Transfers are excluded from income/expense totals either way.
   transferGroupId    String?         @db.Uuid
+  /// ISO-4217 code for `amount`. NULL means the workspace's base currency
+  /// (`Settings.currency`), which is what every existing row is.
+  ///
+  /// No conversion is ever performed. A foreign-currency row is stored,
+  /// displayed and exported with its own code, but is **excluded from every
+  /// aggregated total** so a total can never silently mix currencies. The
+  /// analytics summary reports how many rows were excluded.
+  currency           String?
   /// Deterministic hash of date + normalised description + amount + type + merchant.
   fingerprint        String?
   /// True when the row was produced by the demo seed rather than a real import.
@@ -241,6 +274,7 @@ model Transaction {
   @@index([workspaceId, transactionDate])
   @@index([workspaceId, categoryId])
   @@index([workspaceId, type])
+  @@index([workspaceId, currency])
   @@index([workspaceId, reviewStatus])
   @@index([workspaceId, fingerprint])
   @@index([workspaceId, amount])

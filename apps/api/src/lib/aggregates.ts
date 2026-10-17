@@ -3,12 +3,19 @@ import { Decimal } from './money.ts';
 import { prisma } from './prisma.ts';
 import type { Prisma } from './prisma.ts';
 
+import type { ForeignCurrencyNotice } from '@spendscope/shared';
+
 /**
  * Reusable database aggregation helpers.
  *
  * All period totals are computed **in the database** (SQL `GROUP BY` + `SUM`)
  * rather than by loading every transaction into memory. Every helper takes an
  * inclusive date range and is scoped to a workspace.
+ *
+ * **Currency.** SpendScope performs no conversion. Every aggregate therefore
+ * filters to `currency IS NULL`, which is the workspace base currency. A row in
+ * another currency is left out of the totals and reported separately by
+ * `fetchForeignCurrencyNotice`, so a total can never silently mix currencies.
  */
 
 export interface Range {
@@ -16,15 +23,66 @@ export interface Range {
   to?: string;
 }
 
+export async function fetchForeignCurrencyNotice(
+  workspaceId: string,
+  range: Range,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<ForeignCurrencyNotice> {
+  const grouped = await client.transaction.groupBy({
+    by: ['currency', 'type'],
+    where: {
+      workspaceId,
+      transactionDate: dateOnlyRangeFilter(range.from, range.to),
+      currency: { not: null },
+    },
+    _sum: { amount: true },
+    _count: { _all: true },
+  });
+
+  const byCurrency = new Map<string, { income: Decimal; expenses: Decimal; count: number }>();
+  for (const row of grouped) {
+    const currency = row.currency;
+    if (!currency) continue;
+    const entry = byCurrency.get(currency) ?? { income: new Decimal(0), expenses: new Decimal(0), count: 0 };
+    const amount = row._sum.amount ?? new Decimal(0);
+    if (row.type === 'INCOME') entry.income = entry.income.plus(amount);
+    else if (row.type === 'EXPENSE') entry.expenses = entry.expenses.plus(amount);
+    else if (row.type === 'REFUND') entry.expenses = entry.expenses.minus(amount);
+    entry.count += row._count._all;
+    byCurrency.set(currency, entry);
+  }
+
+  const totals = [...byCurrency.entries()]
+    .map(([currency, entry]) => ({
+      currency,
+      income: entry.income.toFixed(2),
+      expenses: entry.expenses.toFixed(2),
+      count: entry.count,
+    }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+
+  return {
+    count: totals.reduce((sum, entry) => sum + entry.count, 0),
+    currencies: totals.map((entry) => entry.currency),
+    totals,
+  };
+}
+
+export const EMPTY_FOREIGN_CURRENCY_NOTICE: ForeignCurrencyNotice = { count: 0, currencies: [], totals: [] };
+
 export interface PeriodTotalsResult {
   income: Decimal;
   expenses: Decimal;
   refunds: Decimal;
-  /** Number of transactions of any type in the period (including transfers). */
+  /** Number of base-currency transactions of any type in the period (including transfers). */
   transactionCount: number;
   uncategorizedExpenseTotal: Decimal;
   uncategorizedCount: number;
+  /** Rows in other currencies, excluded from every figure above. */
+  foreignCurrency: ForeignCurrencyNotice;
 }
+
+export const BASE_CURRENCY = { currency: null } as const;
 
 export async function fetchPeriodTotals(
   workspaceId: string,
@@ -32,20 +90,22 @@ export async function fetchPeriodTotals(
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<PeriodTotalsResult> {
   const transactionDate = dateOnlyRangeFilter(range.from, range.to);
+  const scope = { workspaceId, currency: null } as const;
 
-  const [byType, uncategorized, total] = await Promise.all([
+  const [byType, uncategorized, total, foreignCurrency] = await Promise.all([
     client.transaction.groupBy({
       by: ['type'],
-      where: { workspaceId, transactionDate },
+      where: { ...scope, transactionDate },
       _sum: { amount: true },
     }),
     client.transaction.groupBy({
       by: ['type'],
-      where: { workspaceId, transactionDate, categoryId: null, type: { in: ['EXPENSE', 'REFUND'] } },
+      where: { ...scope, transactionDate, categoryId: null, type: { in: ['EXPENSE', 'REFUND'] } },
       _sum: { amount: true },
       _count: { _all: true },
     }),
-    client.transaction.count({ where: { workspaceId, transactionDate } }),
+    client.transaction.count({ where: { ...scope, transactionDate } }),
+    fetchForeignCurrencyNotice(workspaceId, range, client),
   ]);
 
   const sumFor = (type: 'INCOME' | 'EXPENSE' | 'REFUND'): Decimal => {
@@ -71,6 +131,7 @@ export async function fetchPeriodTotals(
     transactionCount: total,
     uncategorizedExpenseTotal,
     uncategorizedCount,
+    foreignCurrency,
   };
 }
 
@@ -92,6 +153,7 @@ export async function fetchCategoryExpenseTotals(
     by: ['categoryId', 'type'],
     where: {
       workspaceId,
+      currency: null,
       transactionDate: dateOnlyRangeFilter(range.from, range.to),
       type: { in: ['EXPENSE', 'REFUND'] },
     },
@@ -143,6 +205,7 @@ export async function fetchMonthlyAggregates(
            COALESCE(SUM("amount"), 0)::text AS total
     FROM "Transaction"
     WHERE "workspaceId" = ${workspaceId}::uuid
+      AND "currency" IS NULL
       AND "transactionDate" >= ${from}::date
       AND "transactionDate" <= ${to}::date
       AND "type" IN ('INCOME', 'EXPENSE', 'REFUND')
@@ -185,6 +248,7 @@ export async function fetchDailyAggregates(
            COALESCE(SUM("amount"), 0)::text AS total
     FROM "Transaction"
     WHERE "workspaceId" = ${workspaceId}::uuid
+      AND "currency" IS NULL
       AND "transactionDate" >= ${from}::date
       AND "transactionDate" <= ${to}::date
       AND "type" IN ('INCOME', 'EXPENSE', 'REFUND')

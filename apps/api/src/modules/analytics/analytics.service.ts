@@ -80,6 +80,7 @@ function computePeriodMetricsFromDTO(metrics: PeriodMetrics) {
     transactionCount: metrics.transactionCount,
     uncategorizedExpenseTotal: new Decimal(metrics.uncategorizedExpenseTotal),
     uncategorizedCount: metrics.uncategorizedCount,
+    foreignCurrency: metrics.foreignCurrency,
   };
 }
 
@@ -200,6 +201,8 @@ export async function getRecentTransactions(
   range: { start: string; end: string },
   limit: number,
 ): Promise<TransactionDTO[]> {
+  // Recent transactions are a display list, not a total, so foreign-currency rows
+  // are included and show their own currency. Every aggregate excludes them.
   const rows = await prisma.transaction.findMany({
     where: {
       workspaceId,
@@ -217,9 +220,12 @@ export async function getLargestExpenses(
   range: { start: string; end: string },
   limit: number,
 ): Promise<TransactionDTO[]> {
+  // Ranking "largest" across currencies would compare incomparable amounts, so
+  // this list is restricted to the base currency, like every other aggregate.
   const rows = await prisma.transaction.findMany({
     where: {
       workspaceId,
+      currency: null,
       type: 'EXPENSE',
       transactionDate: { gte: new Date(`${range.start}T00:00:00Z`), lte: new Date(`${range.end}T00:00:00Z`) },
     },

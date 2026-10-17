@@ -7,6 +7,7 @@ import type {
 } from '@spendscope/shared';
 
 import { BadRequestError, NotFoundError } from '../../lib/errors.ts';
+import { baseCurrency, normalizeCurrency } from '../../lib/currency.ts';
 import { dateOnlyToUtcDate, dateOnlyRangeFilter, utcDateToDateOnly as toDateOnly } from '../../lib/dates.ts';
 import { buildFingerprint, normalizeMerchant } from '../../lib/fingerprint.ts';
 import { Decimal } from '../../lib/money.ts';
@@ -77,6 +78,9 @@ function buildWhere(workspaceId: string, query: Partial<TransactionQuery>): Pris
   if (query.importBatchId) {
     where.importBatchId = query.importBatchId;
   }
+  if (query.currency) {
+    where.currency = query.currency === 'base' ? null : query.currency;
+  }
   if (query.minAmount || query.maxAmount) {
     where.amount = {
       ...(query.minAmount ? { gte: query.minAmount } : {}),
@@ -144,12 +148,19 @@ export async function createTransaction(
   workspaceId: string,
   input: CreateTransactionInput,
 ): Promise<TransactionDTO> {
+  const base = await baseCurrency(workspaceId);
+  // `undefined` means "not specified", which for a linked refund means "inherit
+  // the original's currency". `null` is an explicit request for the base currency.
+  const requestedCurrency =
+    input.currency === undefined ? undefined : normalizeCurrency(input.currency, base);
+
   const link = await resolveRefundLink({
     workspaceId,
     type: input.type,
     amount: input.amount,
     refundOfTransactionId: input.refundOfTransactionId,
     categoryId: input.categoryId ?? null,
+    currency: requestedCurrency,
   });
   const categoryId = await resolveCategoryId(workspaceId, link.categoryId, input.type);
   const merchant = input.merchant ?? null;
@@ -167,6 +178,9 @@ export async function createTransaction(
       notes: input.notes ?? null,
       reviewStatus: input.reviewStatus ?? 'NEEDS_REVIEW',
       refundOfTransactionId: link.refundOfTransactionId,
+      // A linked refund takes the original's currency; otherwise the caller's
+      // choice (normalised so the base currency is stored as NULL).
+      currency: link.currency === undefined ? (requestedCurrency ?? null) : link.currency,
       fingerprint: buildFingerprint({
         transactionDate: input.transactionDate,
         description: input.description,
@@ -198,6 +212,12 @@ export async function updateTransaction(
 
   // ---- Refund-link rules ---------------------------------------------------
 
+  const base = await baseCurrency(workspaceId);
+  const requestedCurrency =
+    input.currency !== undefined
+      ? normalizeCurrency(input.currency, base)
+      : (existing.currency ?? null);
+
   const requestedLink =
     input.refundOfTransactionId !== undefined
       ? (input.refundOfTransactionId ?? null)
@@ -218,7 +238,16 @@ export async function updateTransaction(
         `The amount cannot be lower than the ${refunded.toFixed(2)} already refunded against this expense`,
       );
     }
+    // Changing the currency would leave the linked refunds denominated
+    // differently from the expense they reverse.
+    if (refunded.greaterThan(0) && requestedCurrency !== (existing.currency ?? null)) {
+      throw new BadRequestError(
+        'This expense has linked refunds, so its currency cannot be changed. Unlink the refunds first.',
+      );
+    }
   }
+
+  let currency: string | null | undefined = requestedCurrency;
 
   const requestedCategoryId =
     input.categoryId !== undefined
@@ -237,10 +266,12 @@ export async function updateTransaction(
       refundOfTransactionId: requestedLink,
       // `null` means "no explicit category", which is always compatible.
       categoryId: requestedCategoryId === undefined ? null : requestedCategoryId,
+      currency: requestedCurrency,
       selfId: id,
     });
-    // Linked refunds always inherit the original's category.
+    // Linked refunds always inherit the original's category and currency.
     categoryId = link.categoryId;
+    currency = link.currency;
   } else if (requestedCategoryId !== undefined) {
     categoryId = await resolveCategoryId(workspaceId, requestedCategoryId, type);
   }
@@ -257,6 +288,7 @@ export async function updateTransaction(
       ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
       ...(input.reviewStatus !== undefined ? { reviewStatus: input.reviewStatus } : {}),
       refundOfTransactionId: requestedLink,
+      ...(currency !== undefined ? { currency } : {}),
       fingerprint: buildFingerprint({
         transactionDate: fingerprintDate,
         description,

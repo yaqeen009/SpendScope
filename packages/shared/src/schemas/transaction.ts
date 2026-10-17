@@ -9,6 +9,7 @@ import {
   sortOrderSchema,
   transactionTypeSchema,
 } from './common.ts';
+import { SUPPORTED_CURRENCIES } from '../format.ts';
 
 /** Splits a comma-separated query value (`type=EXPENSE,REFUND`) into an array. */
 const commaList = <T extends z.ZodTypeAny>(item: T) =>
@@ -38,6 +39,12 @@ export const createTransactionSchema = z.object({
    * refund reduces spending in the right category.
    */
   refundOfTransactionId: idSchema.nullish(),
+  /**
+   * ISO-4217 code for `amount`. Omit it (or send the workspace base currency)
+   * for a normal row. A **foreign** currency is stored and displayed, but the row
+   * is excluded from every aggregated total because no conversion is performed.
+   */
+  currency: z.enum(SUPPORTED_CURRENCIES).nullish(),
 });
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
@@ -65,6 +72,8 @@ export const transactionQuerySchema = paginationSchema.extend({
   type: commaList(transactionTypeSchema).optional(),
   reviewStatus: reviewStatusSchema.optional(),
   importBatchId: idSchema.optional(),
+  /** Restrict to one currency, or `base` for the workspace base currency. */
+  currency: z.union([z.enum(SUPPORTED_CURRENCIES), z.literal('base')]).optional(),
   minAmount: moneyStringSchema.optional(),
   maxAmount: moneyStringSchema.optional(),
   sortBy: z.enum(SORTABLE_TRANSACTION_FIELDS).default('date'),

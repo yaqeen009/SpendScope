@@ -1,6 +1,7 @@
 import type {
   BudgetProgressItem,
   CategoryKind,
+  ForeignCurrencyNotice,
   ImportStatus,
   PeriodChange,
   PeriodMetrics,
@@ -34,6 +35,7 @@ export interface RawPeriodTotals {
   transactionCount: number;
   uncategorizedExpenseTotal: Decimal;
   uncategorizedCount: number;
+  foreignCurrency: ForeignCurrencyNotice;
 }
 
 export interface PeriodMetricsInternal {
@@ -44,6 +46,7 @@ export interface PeriodMetricsInternal {
   transactionCount: number;
   uncategorizedExpenseTotal: Decimal;
   uncategorizedCount: number;
+  foreignCurrency: ForeignCurrencyNotice;
 }
 
 export function computePeriodMetrics(totals: RawPeriodTotals): PeriodMetricsInternal {
@@ -57,6 +60,7 @@ export function computePeriodMetrics(totals: RawPeriodTotals): PeriodMetricsInte
     transactionCount: totals.transactionCount,
     uncategorizedExpenseTotal: totals.uncategorizedExpenseTotal,
     uncategorizedCount: totals.uncategorizedCount,
+    foreignCurrency: totals.foreignCurrency,
   };
 }
 
@@ -70,6 +74,7 @@ export function toPeriodMetricsDTO(metrics: PeriodMetricsInternal): PeriodMetric
     transactionCount: metrics.transactionCount,
     uncategorizedExpenseTotal: decimalToString(metrics.uncategorizedExpenseTotal),
     uncategorizedCount: metrics.uncategorizedCount,
+    foreignCurrency: metrics.foreignCurrency,
   };
 }
 

@@ -239,4 +239,45 @@ leakage (C-3). Deployment BLOCKED (no credentials/authorization).
 
 ---
 
+## Phase 6 — Currency model (conversion deliberately disabled)
+
+**Changes**
+
+- `Transaction.currency` (nullable). `NULL` means the workspace base currency
+  (`Settings.currency`) and is what every pre-existing row is. A row may instead
+  name an ISO-4217 code.
+- **No conversion exists anywhere.** Every aggregate filters to
+  `currency IS NULL`, so a total can never silently mix currencies.
+  `fetchForeignCurrencyNotice` reports the excluded rows by currency, and the
+  analytics summary carries it as `foreignCurrency`.
+- The web dashboard shows a warning listing the excluded rows whenever any exist,
+  so a total is never presented as complete when it is not.
+- `POST /transactions` accepts `currency`; sending the base currency normalises to
+  `NULL`. An unsupported code is rejected by validation.
+- A refund must be in the original expense's currency, and an expense with linked
+  refunds cannot change currency (both rejected with a clear message). The two
+  sides of a transfer must share a currency, and cross-currency pairs are never
+  suggested.
+- `ExchangeRate` table added and documented as **reserved and unused**: a rate
+  table exists so rates can be recorded and reviewed before conversion is ever
+  enabled, and so the omission is explicit rather than accidental.
+- CSV export gained a `currency` column holding the *resolved* code (so a
+  base-currency row is labelled `GHS`, never blank). Backups carry `currency` and
+  restore it, rejecting an unsupported code in the document.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npm test` | **268 passed** (shared 28 / api 215 / web 25) |
+| `npm run typecheck` | clean |
+
+**Outcome**
+
+- Figures are honest: foreign-currency rows are visible, exportable, backed up and
+  explicitly excluded, never silently summed.
+- Depends on: nothing external. No FX provider, no rate fetching.
+
+---
+
 <!-- phases appended below as they complete -->

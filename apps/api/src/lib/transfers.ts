@@ -43,7 +43,7 @@ export async function linkTransfer(
 
   const rows = await prisma.transaction.findMany({
     where: { id: { in: [transactionId, counterpartId] }, workspaceId },
-    select: { id: true, type: true, amount: true, transactionDate: true, transferGroupId: true },
+    select: { id: true, type: true, amount: true, transactionDate: true, transferGroupId: true, currency: true },
   });
 
   const first = rows.find((row) => row.id === transactionId);
@@ -57,6 +57,14 @@ export async function linkTransfer(
     if (row.transferGroupId) {
       throw new ConflictError('That transaction is already paired. Unlink it first.');
     }
+  }
+
+  // Two sides of one movement must be denominated the same way, because the
+  // pairing asserts that they are the same amount of the same money.
+  if ((first.currency ?? null) !== (second.currency ?? null)) {
+    throw new BadRequestError(
+      'The two sides of a transfer must be in the same currency, because SpendScope does not convert currencies',
+    );
   }
 
   if (!first.amount.equals(second.amount)) {
@@ -111,7 +119,9 @@ export async function suggestTransfers(workspaceId: string): Promise<TransferSug
 
   const byAmount = new Map<string, typeof rows>();
   for (const row of rows) {
-    const key = row.amount.toFixed(2);
+    // Currency is part of the key: two sides of one movement must be the same
+    // money, so a cross-currency pair is never suggested.
+    const key = `${row.amount.toFixed(2)}|${row.currency ?? ''}`;
     const bucket = byAmount.get(key);
     if (bucket) bucket.push(row);
     else byAmount.set(key, [row]);

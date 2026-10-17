@@ -28,6 +28,7 @@ function dashboardFixture(overrides: Partial<DashboardDTO> = {}): DashboardDTO {
         transactionCount: 12,
         uncategorizedExpenseTotal: '0.00',
         uncategorizedCount: 0,
+        foreignCurrency: { count: 0, currencies: [], totals: [] },
       },
       previous: null,
       change: null,

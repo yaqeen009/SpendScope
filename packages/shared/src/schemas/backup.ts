@@ -53,6 +53,8 @@ export const backupTransactionSchema = z.object({
   refundOfId: z.string().max(64).nullish(),
   transferGroupId: z.string().max(64).nullish(),
   importBatchRef: z.string().max(64).nullish(),
+  /** ISO-4217 code, or null/absent for the workspace base currency. */
+  currency: z.string().trim().max(8).nullish(),
 });
 
 export const backupBudgetSchema = z.object({

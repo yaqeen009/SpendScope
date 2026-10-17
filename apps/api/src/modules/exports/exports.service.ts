@@ -2,10 +2,12 @@ import type { ExportQuery, RestoreBackupInput } from '@spendscope/shared';
 import { BACKUP_FORMAT, BACKUP_VERSION } from '@spendscope/shared';
 
 import { dateOnlyRangeFilter } from '../../lib/dates.ts';
+import { baseCurrency, displayCurrency } from '../../lib/currency.ts';
 import { normalizePattern } from '../../lib/category-rules.ts';
 import { normalizeMerchant } from '../../lib/fingerprint.ts';
 import { dateOnlyToUtcDate, utcDateToDateOnly } from '../../lib/dates.ts';
 import { BadRequestError } from '../../lib/errors.ts';
+import { assertSupportedCurrency } from '../../lib/currency.ts';
 import { buildFingerprint } from '../../lib/fingerprint.ts';
 import { prisma } from '../../lib/prisma.ts';
 import type { Prisma } from '../../lib/prisma.ts';
@@ -32,6 +34,7 @@ const CSV_COLUMNS = [
   'description',
   'merchant',
   'amount',
+  'currency',
   'type',
   'category',
   'notes',
@@ -88,6 +91,11 @@ export async function buildTransactionsCsv(
 ): Promise<{ filename: string; csv: string; rows: number; truncated: boolean }> {
   const where = buildWhere(workspaceId, query);
 
+  // The exported code is the *resolved* one, so a base-currency row is labelled
+  // with the workspace's actual currency rather than an empty cell a reader
+  // would have to interpret.
+  const base = await baseCurrency(workspaceId);
+
   const total = await prisma.transaction.count({ where });
   const rows = await prisma.transaction.findMany({
     where,
@@ -101,6 +109,7 @@ export async function buildTransactionsCsv(
     csvCell(row.description),
     csvCell(row.merchant ?? ''),
     row.amount.toFixed(2),
+    displayCurrency(row.currency ?? null, base),
     row.type,
     csvCell(row.category?.name ?? ''),
     csvCell(row.notes ?? ''),
@@ -198,6 +207,7 @@ export async function buildBackup(workspaceId: string): Promise<Record<string, u
       refundOfId: row.refundOfTransactionId,
       transferGroupId: row.transferGroupId,
       importBatchRef: row.importBatchId,
+      currency: row.currency,
     })),
     budgets: budgets.map((budget) => ({
       month: utcDateToDateOnly(budget.month).slice(0, 7),
@@ -333,6 +343,7 @@ export async function restoreBackup(
     const data: Prisma.TransactionCreateManyInput[] = backup.transactions.map((row) => {
       const categoryId = resolveCategory(row.categoryName, row.categoryKind);
       if (row.categoryName && !categoryId) uncategorisedByMissingCategory += 1;
+      if (row.currency) assertSupportedCurrency(row.currency);
       transactionsCreated += 1;
       return {
         workspaceId,
@@ -345,6 +356,7 @@ export async function restoreBackup(
         categoryId,
         notes: row.notes ?? null,
         reviewStatus: row.reviewStatus ?? 'NEEDS_REVIEW',
+        currency: row.currency ?? null,
         fingerprint: buildFingerprint({
           transactionDate: row.transactionDate,
           description: row.description,

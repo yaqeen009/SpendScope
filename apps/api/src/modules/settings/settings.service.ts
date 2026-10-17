@@ -37,6 +37,10 @@ export async function updateSettings(
   input: UpdateSettingsInput,
 ): Promise<SettingsDTO> {
   await getSettings(workspaceId); // ensure the row exists first
+  // Note on changing `currency`: base-currency transactions are stored with
+  // `currency = NULL`, so the change reinterprets them rather than rewriting
+  // history. Rows explicitly denominated in a foreign currency keep that code and
+  // stay outside every total, because no conversion is performed.
   const row = await prisma.settings.update({
     where: { workspaceId },
     data: {
