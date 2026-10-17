@@ -30,6 +30,7 @@ import type {
 import type {
   CategoryKind,
   ImportStatus,
+  RecurrenceCadence,
   ReviewStatus,
   RuleMatchField,
   TransactionType,
@@ -54,6 +55,7 @@ export type {
   ImportStatus,
   LoginInput,
   PeriodKey,
+  RecurrenceCadence,
   RegisterInput,
   ReviewStatus,
   RuleMatchField,
@@ -176,8 +178,33 @@ export interface CategoryRuleDTO {
   updatedAt: string;
 }
 
-/** Result of applying category rules, in dry-run or live mode. */
-export interface CategoryRuleApplyResultDTO {
+/**
+ * A detected recurring transaction series.
+ *
+ * Detection is heuristic and explainable: the same amount appears at a regular
+ * interval. `explanation` states why the series was detected, and nothing is
+ * ever created or changed from it.
+ */
+export interface RecurringSeriesDTO {
+  /** Stable identity, also used to remember a dismissal. */
+  seriesKey: string;
+  name: string;
+  amount: string;
+  type: TransactionType;
+  cadence: RecurrenceCadence;
+  intervalDays: number;
+  occurrences: number;
+  firstDate: string;
+  lastDate: string;
+  nextExpectedDate: string;
+  confidence: 'medium' | 'high';
+  transactionIds: string[];
+  /** Human-readable justification, safe to show to the user. */
+  explanation: string;
+  dismissed: boolean;
+}
+
+/** Result of applying category rules, in dry-run or live mode. */export interface CategoryRuleApplyResultDTO {
   dryRun: boolean;
   /** Rows examined (uncategorised rows, or all rows when including reviewed). */
   scanned: number;

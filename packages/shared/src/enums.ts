@@ -25,6 +25,10 @@ export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 export const RULE_MATCH_FIELDS = ['DESCRIPTION', 'MERCHANT', 'ANY'] as const;
 export type RuleMatchField = (typeof RULE_MATCH_FIELDS)[number];
 
+/** Cadences the recurring-transaction detector recognises. */
+export const RECURRENCE_CADENCES = ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'] as const;
+export type RecurrenceCadence = (typeof RECURRENCE_CADENCES)[number];
+
 /**
  * The set of transaction types that contribute to the *expense* side of the
  * financial summaries. `REFUND` is treated as a negative expense (money coming

@@ -15,6 +15,7 @@ import { budgetsRouter } from './modules/budgets/budgets.routes.ts';
 import { categoriesRouter } from './modules/categories/categories.routes.ts';
 import { categoryRulesRouter } from './modules/category-rules/category-rules.routes.ts';
 import { exportsRouter } from './modules/exports/exports.routes.ts';
+import { recurringRouter } from './modules/recurring/recurring.routes.ts';
 import { healthRouter } from './modules/health/health.routes.ts';
 import { importsRouter } from './modules/imports/imports.routes.ts';
 import { settingsRouter } from './modules/settings/settings.routes.ts';
@@ -111,6 +112,7 @@ export function createApp(): Express {
   protectedApi.use('/imports', importLimiter, importsRouter);
   protectedApi.use('/settings', writeLimiter, settingsRouter);
   protectedApi.use('/exports', exportsRouter);
+  protectedApi.use('/recurring', recurringRouter);
   v1.use(protectedApi);
 
   app.use('/api/v1', v1);

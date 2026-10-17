@@ -85,6 +85,23 @@ model ImportPreview {
   @@index([workspaceId, createdAt])
 }
 
+/// A recurring series the user has dismissed.
+///
+/// Detection is heuristic, so the user can permanently hide a false positive.
+/// Dismissals only affect presentation; no transaction is ever changed.
+model RecurringDismissal {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Stable identity of the series (`name|amount`).
+  seriesKey   String
+  name        String
+  reason      String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, seriesKey])
+}
+
 /// A user-defined rule that assigns a category to otherwise-uncategorised rows.
 ///
 /// Rules never overwrite a category that already exists: they only fill in a
@@ -163,6 +180,7 @@ model Workspace {
   settings      Settings?
   categoryRules CategoryRule[]
   importPreviews ImportPreview[]
+  recurringDismissals RecurringDismissal[]
 
   @@index([ownerUserId])
 }

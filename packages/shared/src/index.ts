@@ -11,6 +11,7 @@ export * from './schemas/category.ts';
 export * from './schemas/category-rule.ts';
 export * from './schemas/backup.ts';
 export * from './schemas/export.ts';
+export * from './schemas/recurring.ts';
 export * from './schemas/budget.ts';
 export * from './schemas/import.ts';
 export * from './schemas/settings.ts';

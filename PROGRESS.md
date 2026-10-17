@@ -204,4 +204,39 @@ leakage (C-3). Deployment BLOCKED (no credentials/authorization).
 
 ---
 
+## Phase 4B — Recurring-transaction detection
+
+**Changes**
+
+- `apps/api/src/lib/recurring.ts` — pure, deterministic detector. Groups rows by
+  normalised name (merchant, else description), requires ≥3 occurrences of the
+  **same amount**, and keeps a series only when every gap is within tolerance of
+  the median gap (a quarter of the median or 4 days, whichever is larger) and the
+  median maps onto a known cadence (weekly, fortnightly, monthly, quarterly,
+  yearly).
+- Each series carries a `seriesKey` (`name|amount`), `intervalDays`,
+  `nextExpectedDate`, `confidence` and a plain-language `explanation`.
+- `GET /api/v1/recurring` — read-only. Writes nothing, ever.
+- `RecurringDismissal` model; `POST /api/v1/recurring/dismiss` and
+  `DELETE /api/v1/recurring/dismiss/:seriesKey`. A dismissal only hides a series
+  and is workspace-scoped.
+- Dismissing an undetected key is rejected (404) so a typo cannot silently hide a
+  real series later.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (api) | **204 passed** (was 188), incl. 10 detector unit tests |
+| `npm run typecheck` | clean |
+
+**Outcome**
+
+- Detection is explainable, cheap and reproducible; the only write in the module
+  is remembering a dismissal.
+- Known limitation, documented: a merchant whose reference number changes each
+  period splits into separate series.
+
+---
+
 <!-- phases appended below as they complete -->
