@@ -1,1 +1,37 @@
-OPENCODE_SPEC.md
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Prisma generated client (recreated with `npm run db:generate`)
+apps/api/src/generated/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Tests / coverage
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Local Postgres dev cluster (see docs/LOCAL_POSTGRES.md)
+.pgdata/
+.pgdata-test/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

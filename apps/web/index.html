@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="SpendScope — privacy-first personal finance analytics. Import a CSV, categorise spending, set budgets and explore your trends locally."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>SpendScope — Personal finance analytics</title>
+    <script>
+      // Apply the saved theme before first paint so there is no flash of the
+      // wrong colour scheme. Storage is UI-only; no financial data is stored here.
+      (function () {
+        try {
+          var stored = localStorage.getItem('spendscope-theme');
+          var preference = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+          var dark =
+            preference === 'dark' ||
+            (preference === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (error) {
+          /* localStorage can be unavailable in private modes — fall back to light. */
+        }
+      })();
+    </script>
+  </head>
+  <body class="h-full">
+    <div id="root" class="h-full"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

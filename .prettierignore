@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+apps/api/src/generated
+playwright-report
+test-results
+package-lock.json
+apps/api/prisma/migrations

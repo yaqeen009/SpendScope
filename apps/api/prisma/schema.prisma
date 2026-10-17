@@ -1,0 +1,160 @@
+// SpendScope data model.
+//
+// Conventions (see docs/DATA_MODEL.md for the full rationale):
+//   * Money is stored as a POSITIVE magnitude in DECIMAL(14,2) together with an
+//     explicit transaction type. The database never stores signed amounts.
+//   * `transactionDate` is a UTC `date` (no time, no timezone) so calendar
+//     dates do not shift; `createdAt`/`updatedAt` are UTC timestamps.
+//   * Every user-owned row carries a `workspaceId`. The MVP seeds exactly one
+//     workspace, but services already scope every query by workspace so adding
+//     authentication later does not require a rewrite.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  REFUND
+}
+
+enum ReviewStatus {
+  NEEDS_REVIEW
+  REVIEWED
+}
+
+enum CategoryKind {
+  INCOME
+  EXPENSE
+}
+
+enum ImportStatus {
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+/// A tenancy boundary. The MVP has a single default workspace.
+model Workspace {
+  id            String        @id @default(uuid()) @db.Uuid
+  name          String
+  isDemo        Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  transactions  Transaction[]
+  categories    Category[]
+  budgets       Budget[]
+  importBatches ImportBatch[]
+  settings      Settings?
+}
+
+model Category {
+  id           String       @id @default(uuid()) @db.Uuid
+  workspaceId  String       @db.Uuid
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name         String
+  kind         CategoryKind
+  color        String?
+  description  String?
+  /// True for the catalogue seeded on first run; false for user-created categories.
+  isDefault    Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, kind])
+}
+
+model Transaction {
+  id                 String          @id @default(uuid()) @db.Uuid
+  workspaceId        String          @db.Uuid
+  workspace          Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactionDate    DateTime        @db.Date
+  description        String
+  merchant           String?
+  /// Lower-cased, punctuation-stripped merchant used for duplicate detection.
+  normalizedMerchant String?
+  /// Positive magnitude; sign is expressed by `type`.
+  amount             Decimal         @db.Decimal(14, 2)
+  type               TransactionType
+  categoryId         String?         @db.Uuid
+  category           Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  notes              String?
+  reviewStatus       ReviewStatus    @default(NEEDS_REVIEW)
+  importBatchId      String?         @db.Uuid
+  importBatch        ImportBatch?    @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  /// Deterministic hash of date + normalised description + amount + type + merchant.
+  fingerprint        String?
+  /// True when the row was produced by the demo seed rather than a real import.
+  isSample           Boolean         @default(false)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([workspaceId, transactionDate])
+  @@index([workspaceId, categoryId])
+  @@index([workspaceId, type])
+  @@index([workspaceId, reviewStatus])
+  @@index([workspaceId, fingerprint])
+  @@index([workspaceId, amount])
+  @@index([importBatchId])
+}
+
+model Budget {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// First day of the budget month, stored as a UTC `date`.
+  month       DateTime  @db.Date
+  amount      Decimal   @db.Decimal(14, 2)
+  /// NULL identifies the single total monthly expense budget.
+  categoryId  String?   @db.Uuid
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([workspaceId, month, categoryId])
+  @@index([workspaceId, month])
+}
+
+model ImportBatch {
+  id            String       @id @default(uuid()) @db.Uuid
+  workspaceId   String       @db.Uuid
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  filename      String
+  status        ImportStatus
+  totalRows     Int
+  createdRows   Int          @default(0)
+  duplicateRows Int          @default(0)
+  invalidRows   Int          @default(0)
+  skippedRows   Int          @default(0)
+  /// Where the rows came from, e.g. "csv" or "manual" or "seed".
+  source        String       @default("csv")
+  notes         String?
+  createdAt     DateTime     @default(now())
+  completedAt   DateTime?
+  transactions  Transaction[]
+
+  @@index([workspaceId, createdAt])
+}
+
+/// Single-row application settings (`id = 1`).
+model Settings {
+  id            Int      @id @default(1)
+  workspaceId   String   @unique @db.Uuid
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  currency      String   @default("GHS")
+  locale        String   @default("en-GH")
+  theme         String   @default("system")
+  defaultPeriod String   @default("this_month")
+  updatedAt     DateTime @updatedAt
+}
