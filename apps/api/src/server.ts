@@ -3,6 +3,7 @@ import { assertProductionConfiguration, env } from './config/env.ts';
 import { logger } from './lib/logger.ts';
 import { prisma } from './lib/prisma.ts';
 import { pruneExpiredSessions } from './modules/auth/auth.service.ts';
+import { importPreviewStore } from './modules/imports/preview-store.instance.ts';
 import { ensureWorkspace } from './modules/workspace/workspace.service.ts';
 
 /**
@@ -34,12 +35,18 @@ async function main(): Promise<void> {
   try {
     const removed = await pruneExpiredSessions();
     if (removed > 0) logger.info({ removed }, 'pruned expired sessions');
+    const previews = await importPreviewStore.purgeExpired();
+    if (previews > 0) logger.info({ removed: previews }, 'pruned expired import previews');
   } catch (error) {
-    logger.warn({ err: error }, 'could not prune expired sessions at startup');
+    logger.warn({ err: error }, 'could not prune expired rows at startup');
   }
   const pruneTimer = setInterval(
     () => {
       void pruneExpiredSessions().catch((error: unknown) => logger.warn({ err: error }, 'session prune failed'));
+      // Parsed CSV previews expire too; sweeping them here keeps the table small.
+      void importPreviewStore
+        .purgeExpired()
+        .catch((error: unknown) => logger.warn({ err: error }, 'import preview prune failed'));
     },
     60 * 60 * 1000,
   );

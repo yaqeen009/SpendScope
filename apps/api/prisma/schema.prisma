@@ -52,6 +52,39 @@ enum RuleMatchField {
   ANY
 }
 
+/// A parsed CSV upload awaiting confirmation.
+///
+/// The wizard previews a file and commits it in a second request. The commit
+/// must not trust rows sent back by the browser, so the server stores the
+/// *parsed records* (never the raw file) here and re-validates them on commit.
+/// Storing in the database (rather than in process memory) means a restart or a
+/// second API instance does not lose an outstanding preview.
+///
+/// Rows are deleted once `expiresAt` passes.
+model ImportPreview {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @db.Uuid
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  filename      String
+  fileSizeBytes Int
+  headers       Json
+  records       Json
+  detection     Json
+  mapping       Json?
+  warnings      Json
+  /// PENDING → COMMITTING → COMMITTED. A commit is idempotent: replaying the
+  /// same preview id returns the recorded result instead of importing again.
+  status        String    @default("PENDING")
+  /// The recorded ImportCommitResultDTO, returned on a repeated commit.
+  result        Json?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  committedAt   DateTime?
+
+  @@index([expiresAt])
+  @@index([workspaceId, createdAt])
+}
+
 /// A user-defined rule that assigns a category to otherwise-uncategorised rows.
 ///
 /// Rules never overwrite a category that already exists: they only fill in a
@@ -129,6 +162,7 @@ model Workspace {
   importBatches ImportBatch[]
   settings      Settings?
   categoryRules CategoryRule[]
+  importPreviews ImportPreview[]
 
   @@index([ownerUserId])
 }

@@ -164,4 +164,44 @@ leakage (C-3). Deployment BLOCKED (no credentials/authorization).
 
 ---
 
+## Phase 5 — Export, backup/restore and durable import previews
+
+**Changes**
+
+- `GET /api/v1/exports/transactions.csv` — filtered CSV download using the same
+  filters as the transaction list, capped at 50,000 rows (`X-Total-Truncated`
+  reports whether the cap was hit). Cells that begin with `=`, `+`, `-`, `@`,
+  TAB or CR are prefixed with a single quote, so a spreadsheet cannot execute
+  them as a formula. Nothing in the file is ever evaluated by SpendScope.
+- `GET /api/v1/exports/backup.json` — versioned document
+  (`format: "spendscope-backup"`, `version: 1`) holding settings, categories,
+  category rules, import batches, transactions and budgets. Categories travel by
+  **name and kind**, not id, so a backup restores into a workspace whose ids
+  differ.
+- `POST /api/v1/exports/restore` — `mode: replace|merge` plus
+  `confirm: "RESTORE"`. Runs in one transaction, only ever touches the
+  authenticated workspace, preserves refund links, skips duplicate budgets and
+  duplicate rules, and reports rows whose category was missing from the document.
+- `ImportPreview` table replaces the in-process preview map. Previews now survive
+  a restart and are shared by every instance, expire on a TTL, and commit
+  **idempotently**: `status` moves PENDING → COMMITTING → COMMITTED inside the
+  same transaction as the insert, and replaying a preview id returns the recorded
+  result instead of importing the rows twice.
+
+**Checks executed**
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run` (api) | **188 passed** (was 181) |
+| `npm run typecheck` | clean |
+
+**Outcome**
+
+- The commit step is now safe to retry, which is what a flaky network needs.
+- Restore is destructive only within the caller's own workspace, and only with
+  an explicit confirmation string.
+- No export/backup UI yet: the endpoints are API-only and documented.
+
+---
+
 <!-- phases appended below as they complete -->

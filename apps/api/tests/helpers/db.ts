@@ -30,7 +30,7 @@ async function testPasswordHash(): Promise<string> {
 
 export async function resetDatabase(): Promise<string> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "Transaction", "Budget", "ImportBatch", "Category", "Settings", "Session", "User", "Workspace" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "Transaction", "Budget", "ImportBatch", "ImportPreview", "CategoryRule", "Category", "Settings", "Session", "User", "Workspace" RESTART IDENTITY CASCADE',
   );
   importPreviewStore.stop();
   importPreviewStore.start();

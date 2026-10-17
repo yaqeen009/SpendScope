@@ -135,12 +135,22 @@ describe('POST /api/v1/imports (commit)', () => {
     expect(response.body.error.details.invalidRows).toBe(1);
   });
 
-  it('treats a preview as single-use', async () => {
+  it('makes a commit idempotent instead of importing twice', async () => {
     const data = await preview(OPAQUE_CSV, {
       mapping: { date: 'When', description: 'What', amount: 'How much' },
     });
-    await api(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(201);
-    await api(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(404);
+
+    const first = await api(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(201);
+    const second = await api(app).post('/api/v1/imports').send({ previewId: data.previewId }).expect(201);
+
+    // The replay reports the same batch and the same counts...
+    expect(second.body.data.batch.id).toBe(first.body.data.batch.id);
+    expect(second.body.data).toMatchObject({ created: first.body.data.created, total: first.body.data.total });
+
+    // ...and no extra rows were written.
+    const listed = await api(app).get('/api/v1/transactions').expect(200);
+    const matching = (listed.body.data as { description: string }[]).filter((row) => row.description === 'Shop');
+    expect(matching).toHaveLength(1);
   });
 
   it('rejects a category override that does not match the row type', async () => {

@@ -18,7 +18,7 @@ import {
 } from '@spendscope/shared';
 
 import { env } from '../../config/env.ts';
-import { BadRequestError, NotFoundError } from '../../lib/errors.ts';
+import { BadRequestError, ConflictError, NotFoundError } from '../../lib/errors.ts';
 import { buildFingerprint, normalizeMerchant } from '../../lib/fingerprint.ts';
 import { loadActiveRules, firstMatch, type LoadedRule } from '../../lib/category-rules.ts';
 import { cleanHeader, parseCsv, toCsv, type Delimiter } from '../../lib/csv.ts';
@@ -267,7 +267,7 @@ export async function previewImport(
 ): Promise<ImportPreviewDTO> {
   let source: ParsedSource;
   if (input.previewId) {
-    const stored = importPreviewStore.get(input.previewId);
+    const stored = await importPreviewStore.get(input.previewId);
     if (!stored || stored.workspaceId !== workspaceId) {
       throw new NotFoundError('Import preview (it may have expired — upload the file again)');
     }
@@ -321,7 +321,7 @@ export async function previewImport(
   }
 
   if (!isMappingComplete(effectiveMapping)) {
-    const stored = importPreviewStore.create({
+    const stored = await importPreviewStore.create({
       workspaceId,
       filename: source.filename,
       fileSizeBytes: source.fileSizeBytes,
@@ -364,7 +364,7 @@ export async function previewImport(
   const rules = await loadActiveRules(workspaceId);
   const summary: ImportSummaryDTO = summarizeCandidates(candidates);
 
-  const stored = importPreviewStore.create({
+  const stored = await importPreviewStore.create({
     workspaceId,
     filename: source.filename,
     fileSizeBytes: source.fileSizeBytes,
@@ -401,7 +401,7 @@ export async function rebuildCandidatesForPreview(
   workspaceId: string,
   previewId: string,
 ): Promise<CandidateBundle> {
-  const stored = importPreviewStore.get(previewId);
+  const stored = await importPreviewStore.get(previewId);
   if (!stored || stored.workspaceId !== workspaceId) {
     throw new NotFoundError('Import preview (it may have expired — upload the file again)');
   }
@@ -425,6 +425,19 @@ export async function commitImport(
   workspaceId: string,
   input: ImportCommitInput,
 ): Promise<ImportCommitResultDTO> {
+  // Idempotency: a preview that was already committed replays its recorded
+  // result instead of importing its rows a second time.
+  const preview = await importPreviewStore.get(input.previewId);
+  if (!preview || preview.workspaceId !== workspaceId) {
+    throw new NotFoundError('Import preview (it may have expired — upload the file again)');
+  }
+  if (preview.status === 'COMMITTED' && preview.result) {
+    return preview.result as ImportCommitResultDTO;
+  }
+  if (preview.status !== 'PENDING') {
+    throw new ConflictError('This import is already being processed');
+  }
+
   const { candidates, filename } = await rebuildCandidatesForPreview(workspaceId, input.previewId);
   const categories = await loadCategoryIndex(workspaceId);
   const rules = await loadActiveRules(workspaceId);
@@ -515,7 +528,17 @@ export async function commitImport(
 
   const status = toInsert.length === 0 ? 'FAILED' : skipped > 0 ? 'PARTIAL' : 'COMPLETED';
 
-  const batch = await prisma.$transaction(async (tx) => {
+  const outcome = await prisma.$transaction(async (tx) => {
+    // Claim the preview inside the same transaction as the insert, so two
+    // concurrent commits cannot both import the same rows.
+    const claim = await importPreviewStore.claim(tx, input.previewId, workspaceId);
+    if (!claim.claimed) {
+      if (claim.existing?.status === 'COMMITTED' && claim.existing.result) {
+        return { replay: claim.existing.result as ImportCommitResultDTO };
+      }
+      throw new ConflictError('This import is already being processed');
+    }
+
     const createdBatch = await tx.importBatch.create({
       data: {
         workspaceId,
@@ -542,23 +565,26 @@ export async function commitImport(
       data: { status, createdRows: toInsert.length, completedAt: new Date() },
     });
 
-    return updated;
+    const result: ImportCommitResultDTO = {
+      batch: toImportBatchDTO(updated),
+      created: toInsert.length,
+      skippedDuplicates,
+      rejected: invalidCount,
+      total,
+      errors: invalid.slice(0, 100).map((candidate) => ({
+        rowIndex: candidate.rowIndex,
+        messages: candidate.errors,
+      })),
+    };
+
+    // Record the result so a repeated commit replays it rather than re-importing.
+    await importPreviewStore.complete(tx, input.previewId, result);
+
+    return { replay: null, result };
   });
 
-  // A preview is single-use: a second commit with the same id cannot re-import.
-  importPreviewStore.delete(input.previewId);
-
-  return {
-    batch: toImportBatchDTO(batch),
-    created: toInsert.length,
-    skippedDuplicates,
-    rejected: invalidCount,
-    total,
-    errors: invalid.slice(0, 100).map((candidate) => ({
-      rowIndex: candidate.rowIndex,
-      messages: candidate.errors,
-    })),
-  };
+  if (outcome.replay) return outcome.replay;
+  return outcome.result!;
 }
 
 function buildBatchNotes(input: {
