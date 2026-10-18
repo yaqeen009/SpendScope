@@ -508,6 +508,56 @@ production-ready.
    application rollback, and record what was lost first: a restore replaces the
    whole database.
 
+### 7. Troubleshooting: "Registration is disabled on this installation"
+
+The sign-in footer shows that sentence only when the API answers
+`GET /api/v1/auth/config` with `registrationEnabled: false`. A request that
+fails or has not answered yet must never be reported as disabled, and the app no
+longer does: an unreachable API now reads "Could not reach SpendScope to check
+registration." with a retry control. If you still see the *disabled* wording,
+the browser did reach the API and the API said no:
+
+```bash
+# 1. What the API says, without an Origin header (always allowed).
+curl -sS "https://<your-api>.onrender.com/api/v1/auth/config"; echo
+
+# 2. What it says to the browser: the Vercel origin must be echoed back.
+curl -sS -D - -o /dev/null "https://<your-api>.onrender.com/api/v1/auth/config" \
+  -H "Origin: https://<your-app>.vercel.app" | grep -i access-control-allow-origin
+```
+
+- Step 1 returns `"registrationEnabled":true` → the API is fine and
+  `ALLOW_REGISTRATION` is in effect.
+- Step 2 prints **nothing** → `CORS_ORIGIN` on Render does not contain that exact
+  origin. This is the usual cause. The browser cannot read the response, so the
+  configuration is unknown to the frontend. Fix `CORS_ORIGIN` (below), not
+  `ALLOW_REGISTRATION`.
+- Step 2 prints the origin, but the app still reports disabled → the browser is
+  calling a *different* API. Check the value compiled into the bundle, because
+  `VITE_API_URL` is inlined at build time:
+
+  ```bash
+  curl -sS "https://<your-app>.vercel.app/"
+  # then fetch the referenced /assets/*.js and grep it for the API host
+  ```
+
+  If the bundle has no API host, `VITE_API_URL` was missing when Vercel built the
+  SPA and every call went to the Vercel origin, where `/api/v1/...` is not
+  served (Vercel returns the SPA HTML, which is not JSON). Set it and redeploy.
+
+`CORS_ORIGIN` accepts a comma-separated list, and a Vercel deployment URL changes
+on every deployment, so list the stable production alias as well:
+
+```
+CORS_ORIGIN=https://<your-app>.vercel.app,https://<project>-git-main-<team>.vercel.app
+```
+
+Add a custom domain (for example `app.example.com`) and use it as the single
+entry — it survives deployments and makes the `SameSite` decision easier. After
+changing Render variables the service restarts; the production guard runs first
+and will refuse to start with the offending variable named if the value is
+malformed.
+
 ## Production configuration
 
 Every variable is documented in `.env.example`. The values that matter in

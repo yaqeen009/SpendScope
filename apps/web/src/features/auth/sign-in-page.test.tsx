@@ -32,7 +32,7 @@ describe('SignInPage', () => {
     expect(create).toHaveAttribute('href', '/sign-up');
   });
 
-  it('says registration is disabled when the server turns it off', () => {
+  it('says registration is disabled when the server turns it off', async () => {
     stubApi([
       configHandler({ data: { registrationEnabled: false, minPasswordLength: 12, sessionTtlHours: 720 } }),
       route('/auth/me', { error: { code: 'UNAUTHORIZED', message: 'Not signed in' } }, 401),
@@ -44,8 +44,40 @@ describe('SignInPage', () => {
       { route: '/sign-in' },
     );
 
-    expect(screen.getByText('Registration is disabled on this installation.')).toBeInTheDocument();
+    expect(await screen.findByText('Registration is disabled on this installation.')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Create one' })).not.toBeInTheDocument();
+  });
+
+  it('does not claim registration is disabled while the answer is unknown', () => {
+    stubApi([
+      // The configuration request never settles, as when the API is unreachable.
+      () => new Promise<Response>(() => {}),
+    ]);
+    renderWithProviders(
+      <AuthProvider>
+        <SignInPage />
+      </AuthProvider>,
+      { route: '/sign-in' },
+    );
+
+    expect(screen.queryByText('Registration is disabled on this installation.')).not.toBeInTheDocument();
+  });
+
+  it('reports a configuration failure instead of claiming registration is off', async () => {
+    stubApi([
+      route('/auth/config', { error: { code: 'INTERNAL', message: 'boom' } }, 500),
+      route('/auth/me', { error: { code: 'UNAUTHORIZED', message: 'Not signed in' } }, 401),
+    ]);
+    renderWithProviders(
+      <AuthProvider>
+        <SignInPage />
+      </AuthProvider>,
+      { route: '/sign-in' },
+    );
+
+    expect(await screen.findByText(/Could not reach SpendScope to check registration/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Registration is disabled on this installation.')).not.toBeInTheDocument();
   });
 
   it('shows a validation error for a malformed email without submitting', async () => {

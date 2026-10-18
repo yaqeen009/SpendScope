@@ -49,22 +49,48 @@ export function SignInPage() {
     }
   });
 
+  /**
+   * Registration state comes from the server. An unreachable or still-loading
+   * configuration must never be reported as "disabled" — that is a statement
+   * about the server, and claiming it while the answer is unknown sends people
+   * away from an app that would have let them register.
+   */
+  const registrationFooter = (() => {
+    if (config.isPending) return null;
+
+    if (config.isError) {
+      return (
+        <span>
+          Could not reach SpendScope to check registration.{' '}
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0 text-sm"
+            onClick={() => void config.refetch()}
+          >
+            Try again
+          </Button>
+        </span>
+      );
+    }
+
+    return config.data?.registrationEnabled ? (
+      <>
+        No account yet?{' '}
+        <Link to="/sign-up" className="font-medium text-primary underline-offset-4 hover:underline">
+          Create one
+        </Link>
+      </>
+    ) : (
+      'Registration is disabled on this installation.'
+    );
+  })();
+
   return (
     <AuthLayout
       title="Sign in"
       description="Track your income, spending and trends. Your financial data is private to your account."
-      footer={
-        config.data?.registrationEnabled ? (
-          <>
-            No account yet?{' '}
-            <Link to="/sign-up" className="font-medium text-primary underline-offset-4 hover:underline">
-              Create one
-            </Link>
-          </>
-        ) : (
-          'Registration is disabled on this installation.'
-        )
-      }
+      footer={registrationFooter}
     >
       {formError ? (
         <Alert variant="destructive" title="Could not sign in">

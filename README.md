@@ -167,7 +167,7 @@ npm run test:e2e                           # Playwright (full stack)
 npm audit --omit=dev                       # dependency check
 ```
 
-**316 tests pass**: shared 28, API 238 (22 files), web 60, plus 7 Playwright
+**318 tests pass**: shared 28, API 238 (22 files), web 62, plus 7 Playwright
 end-to-end tests.
 
 - **Shared** (`packages/shared`): money, date, period and formatting helpers.
