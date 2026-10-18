@@ -166,8 +166,15 @@ export function DashboardPage() {
             </Card>
           </section>
 
-          <section aria-label="Recent activity" className="grid gap-4 xl:grid-cols-3">
-            <Card className="xl:col-span-2">
+          {/*
+            `grid-cols-1` matters: without it the implicit column is `auto`, sized
+            by the widest item's min-content. The table's cells are nowrap, so that
+            track grew to ~520px and every card in the section inherited it — the
+            page itself scrolled sideways on a phone. `minmax(0, 1fr)` keeps the
+            track inside the viewport and lets `TableContainer` scroll instead.
+          */}
+          <section aria-label="Recent activity" className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <Card className="min-w-0 xl:col-span-2">
               <CardHeader className="flex-row items-center justify-between">
                 <div>
                   <CardTitle>Recent transactions</CardTitle>
@@ -186,42 +193,88 @@ export function DashboardPage() {
                     No transactions in this period.
                   </p>
                 ) : (
-                  <TableContainer>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Description</TableHead>
-                          <TableHead>Category</TableHead>
-                          <TableHead className="text-right">Amount</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {dashboard.recentTransactions.map((row) => (
-                          <TableRow key={row.id}>
-                            <TableCell className="whitespace-nowrap text-muted-foreground">
-                              {formatDate(row.transactionDate)}
-                            </TableCell>
-                            <TableCell className="max-w-[16rem] truncate">
+                  <>
+                    {/*
+                      A phone gives this card ~286px. The table below needs 439px
+                      — four columns, none of them droppable — so it cannot fit,
+                      and squeezing it with `table-layout: fixed` overflows the
+                      cells instead. Below `sm` the same rows are therefore
+                      shown as a compact two-line list; from `sm` up, where the
+                      card is wide enough for the table, the table is used.
+                      Exactly one of the two is rendered as an element, so the
+                      data is never announced twice.
+                    */}
+                    <ul className="-my-1 flex flex-col divide-y divide-border sm:hidden">
+                      {dashboard.recentTransactions.map((row) => (
+                        <li key={row.id} className="flex items-start justify-between gap-3 py-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm">
                               {row.description}
-                              {row.isSample ? <span className="ml-2 text-xs text-muted-foreground">(sample)</span> : null}
-                            </TableCell>
-                            <TableCell>
+                              {row.isSample ? (
+                                <span className="ml-2 text-xs text-muted-foreground">(sample)</span>
+                              ) : null}
+                            </p>
+                            <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                              <span className="whitespace-nowrap">{formatDate(row.transactionDate)}</span>
+                              <span aria-hidden="true">·</span>
                               {row.category ? (
-                                <CategoryChip name={row.category.name} color={row.category.color} />
+                                <CategoryChip
+                                  name={row.category.name}
+                                  color={row.category.color}
+                                  className="min-w-0 text-xs"
+                                />
                               ) : (
-                                <span className="text-muted-foreground">Uncategorized</span>
+                                <span className="truncate">Uncategorized</span>
                               )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Amount type={row.type} formatted={formatMoney(row.amount)} />
-                              <span className="sr-only"> ({TRANSACTION_TYPE_LABELS[row.type]})</span>
-                            </TableCell>
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <Amount type={row.type} formatted={formatMoney(row.amount)} />
+                            <span className="sr-only"> ({TRANSACTION_TYPE_LABELS[row.type]})</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <TableContainer className="hidden sm:block">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                        </TableHeader>
+                        <TableBody>
+                          {dashboard.recentTransactions.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="whitespace-nowrap text-muted-foreground sm:text-xs">
+                                {formatDate(row.transactionDate)}
+                              </TableCell>
+                              <TableCell className="max-w-32 truncate lg:max-w-[16rem]">
+                                {row.description}
+                                {row.isSample ? (
+                                  <span className="ml-2 text-xs text-muted-foreground">(sample)</span>
+                                ) : null}
+                              </TableCell>
+                              <TableCell>
+                                {row.category ? (
+                                  <CategoryChip name={row.category.name} color={row.category.color} />
+                                ) : (
+                                  <span className="text-muted-foreground">Uncategorized</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Amount type={row.type} formatted={formatMoney(row.amount)} />
+                                <span className="sr-only"> ({TRANSACTION_TYPE_LABELS[row.type]})</span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </>
                 )}
               </CardContent>
             </Card>

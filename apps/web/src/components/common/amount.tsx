@@ -48,12 +48,14 @@ export function TypeBadge({ type, label }: { type: TransactionType; label: strin
 export function CategoryChip({
   name,
   color,
+  className,
 }: {
   name: string;
   color?: string | null;
+  className?: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-sm">
+    <span className={cn('inline-flex min-w-0 items-center gap-1.5 text-sm', className)}>
       <span
         className="size-2.5 shrink-0 rounded-full border border-border"
         style={{ background: color ?? 'var(--muted-foreground)' }}
