@@ -58,7 +58,7 @@ export function SettingsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Settings"
-        description="Display preferences, sample data and data management. Everything is stored locally."
+        description="Display preferences, sample data and data management. Everything is stored in your account."
       />
 
       {settingsQuery.isPending ? <LoadingState label="Loading settings…" /> : null}
@@ -100,8 +100,9 @@ export function SettingsPage() {
             <CardHeader>
               <CardTitle>Sample data</CardTitle>
               <CardDescription>
-                A fictional dataset, generated locally, so you can explore the app before importing your own bank
-                exports. Sample rows are always labelled and never affect your real data unless you import over them.
+                A fictional dataset, generated in your workspace, so you can explore the app before importing your own
+                bank exports. Sample rows are always labelled and never affect your real data unless you import over
+                them.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">

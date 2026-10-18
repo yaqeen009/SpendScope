@@ -175,9 +175,9 @@ describe('ImportWizard', () => {
     expect(await screen.findByText('Import rows')).toBeInTheDocument();
   });
 
-  it('explains that the file is parsed locally and stays on the machine', () => {
+  it('explains that the file is uploaded and stored in the workspace', () => {
     stubApi(baseHandlers());
     renderWithProviders(<ImportWizard />);
-    expect(screen.getByText(/Nothing leaves your machine/)).toBeInTheDocument();
+    expect(screen.getByText(/stored in your private workspace/)).toBeInTheDocument();
   });
 });

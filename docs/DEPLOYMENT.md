@@ -349,6 +349,165 @@ parts, nothing to misconfigure, and the API stays off the public internet.
 | `prisma migrate deploy` times out pre-deploy | the database URL points at the public TCP proxy from inside the project | Use the private URL (`${{Postgres.DATABASE_URL}}`) |
 | Web build served an old bundle | `index.html` caching | It is served `no-store`; hard-refresh, and confirm the deploy actually replaced the `web` deployment |
 
+## Deploying to Vercel (SPA) + Render (API) + Neon (PostgreSQL)
+
+The production split this repository is deployed to: the SPA on **Vercel**,
+the API on **Render**, PostgreSQL on **Neon**. All three need settings that only
+you can supply from their dashboards.
+
+### What gets deployed
+
+| Service | What it is | Public? |
+| ------- | ---------- | ------- |
+| Neon | Lakebase PostgreSQL (pooled + direct connection strings) | No — reached only by Render |
+| Render | Node service running `apps/api/dist/server.js` | Yes — `https://<api>.onrender.com` |
+| Vercel | Static SPA from `apps/web/dist` | Yes — `https://<app>.vercel.app` |
+
+The browser calls the API **cross-site** (Vercel → Render), which drives two
+requirements that do not exist in the local or same-origin setups:
+
+1. **CORS** must allow the Vercel origin, with credentials.
+2. **The session cookie must be `SameSite=None; Secure`** — a `SameSite=Lax`
+   cookie is not sent on cross-site requests, so every API call would answer
+   `401` and the app would look broken even though registration succeeded.
+
+### 1. Neon
+
+1. Create a project and a branch (the default branch is fine).
+2. From the dashboard → **Connection Details**, copy both strings:
+   - **Pooled** connection (hostname contains `-pooler`) → `DATABASE_URL`
+   - **Direct** connection (no `-pooler`) → `DATABASE_URL_UNPOOLED`
+3. IP allow list: leave open, or restrict to Render's egress IPs if your plan
+   supports it.
+4. Note: idle compute **scales to zero** (suspends after ~5 minutes). The first
+   query after a pause pays a cold-start penalty of a few hundred milliseconds;
+   readiness checks get slow, not wrong. Storage stays billed while suspended.
+5. Verify what backup/restore history your plan includes.
+
+### 2. Render
+
+Web Service, Node, **root directory = repository root** (npm workspaces need the
+root `package.json` and lockfile).
+
+| Setting | Value |
+| ------- | ----- |
+| Build Command | `npm ci --include=dev && npm run db:generate && npm run build --workspace @spendscope/api` |
+| Start Command | `npm run start --workspace @spendscope/api` (Render injects `PORT`) |
+| Health Check Path | `/api/v1/health` |
+
+**Variables**:
+
+```
+NODE_ENV=production
+DATABASE_URL=<Neon pooled URL>
+DATABASE_URL_UNPOOLED=<Neon direct URL>
+CORS_ORIGIN=https://<your-app>.vercel.app
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_SAME_SITE=none
+TRUST_PROXY=1
+BOOTSTRAP_DEFAULT_WORKSPACE=false
+ALLOW_REGISTRATION=true
+LOG_LEVEL=info
+```
+
+- `DATABASE_URL_UNPOOLED` is what makes migrations work: Prisma's CLI prefers
+  it for `migrate deploy` (wired in `apps/api/prisma.config.ts`), while the
+  running application always uses the pooled `DATABASE_URL`. Running migrations
+  over the pooled connection fails with misleading errors.
+- `CORS_ORIGIN` must be the **exact** Vercel origin. A mismatch means the
+  browser blocks every response — this is what "registration does not work"
+  looks like from the outside.
+- `SESSION_COOKIE_SAME_SITE=none` is required with the default Vercel/Render
+  domains. It is only valid together with `Secure` (the API refuses to start
+  otherwise). It weakens CSRF defence relative to same-origin, so the origin
+  check on state-changing requests is doing the real work — leave it in place.
+- Stronger alternative: serve both from one registrable domain
+  (`app.example.com` on Vercel, `api.example.com` on Render) and use
+  `SESSION_COOKIE_SAME_SITE=lax` instead.
+- Leave `ALLOW_LOCAL_DATABASE_IN_PRODUCTION` and `ALLOW_INSECURE_COOKIES` unset.
+
+Deploy once, then confirm the service starts (the production configuration
+guard runs first and names any problem).
+
+### 3. Vercel
+
+Import the repository. Keep **Root Directory = repository root** (setting it to
+`apps/web` breaks the workspace install).
+
+| Setting | Value |
+| ------- | ----- |
+| Framework Preset | Vite |
+| Build Command | `npm run build --workspace @spendscope/web` |
+| Output Directory | `apps/web/dist` |
+| Install Command | (default `npm install` is fine) |
+
+**Variables** (build-time — inlined into the bundle, so a change needs a new
+deployment):
+
+```
+VITE_API_URL=https://<your-api>.onrender.com
+```
+
+Only `VITE_*` variables are exposed to the frontend bundle. Never put
+`DATABASE_URL`, cookie names, or any other backend variable here.
+
+### 4. Migrations
+
+```bash
+DATABASE_URL_UNPOOLED="<Neon direct URL>" npm run db:deploy
+```
+
+Applies every committed migration, in order, skipping ones already recorded.
+Never `migrate reset`, `db push --force-reset`, or `db:seed` against production.
+
+### 5. Verify before opening the app to users
+
+```bash
+API=https://<your-api>.onrender.com
+WEB=https://<your-app>.vercel.app
+
+# Liveness and readiness.
+curl -fsS "$API/api/v1/health" | head -c 200; echo
+curl -fsS "$API/api/v1/health/ready"; echo          # expect database: "up"
+
+# CORS: the Vercel origin is allowed with credentials, a foreign origin is not.
+curl -sS -D - -o /dev/null "$API/api/v1/health" \
+  -H "Origin: $WEB" | grep -i '^access-control-allow-origin'   # expect the Vercel URL
+curl -sS -D - -o /dev/null "$API/api/v1/health" \
+  -H "Origin: https://evil.example" | grep -ci '^access-control-allow-origin' || true  # expect 0
+
+# The SPA is served and a deep client-side route falls back to it.
+curl -fsS -o /dev/null -w '%{http_code}\n' "$WEB/"
+curl -fsS -o /dev/null -w '%{http_code}\n' "$WEB/transactions"
+
+# Security headers on the SPA.
+curl -fsSI "$WEB/" | grep -i -E 'content-security-policy|x-content-type-options'
+```
+
+Then in a browser: register an account (check the cookie is `Secure;
+SameSite=None; HttpOnly`), import the CSV template from the import wizard,
+confirm the rows appear on the dashboard, sign out, and confirm a protected page
+returns to sign-in. Confirm in Render's logs that request ids appear and no
+transaction descriptions, merchants, amounts or cookie values do.
+
+Finally, once your own account exists, set `ALLOW_REGISTRATION=false` on Render
+if this is a private deployment. There is no password-reset email, so keep a
+way to sign in before closing registration.
+
+Record the result in `docs/PRODUCTION_TEST_REPORT.md`. Until this table passes,
+the deployment is unverified and no claim is made that SpendScope is
+production-ready.
+
+### 6. Rollback
+
+1. Vercel and Render both keep previous deployments — redeploy the last
+   known-good one for each service. `index.html` is served `no-store`, so
+   browsers pick up the earlier bundle on the next load.
+2. Do **not** roll migrations backwards; releases are additive for one version.
+3. If a release corrupted data, restore the Neon branch **after** the
+   application rollback, and record what was lost first: a restore replaces the
+   whole database.
+
 ## Production configuration
 
 Every variable is documented in `.env.example`. The values that matter in

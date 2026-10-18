@@ -52,7 +52,7 @@ export function SignInPage() {
   return (
     <AuthLayout
       title="Sign in"
-      description="Your financial data is private to this account."
+      description="Track your income, spending and trends. Your financial data is private to your account."
       footer={
         config.data?.registrationEnabled ? (
           <>

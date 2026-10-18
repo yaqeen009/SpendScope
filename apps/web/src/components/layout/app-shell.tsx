@@ -218,8 +218,8 @@ export function AppShell() {
 
         <footer className="border-t border-border px-4 py-4 text-xs text-muted-foreground sm:px-6 lg:px-8">
           <p>
-            SpendScope stores your data in your own database and never sends it to a third-party analytics or
-            aggregation service.
+            SpendScope keeps your workspace private to your account and never sends your data to a third-party
+            analytics or aggregation service.
           </p>
         </footer>
       </div>

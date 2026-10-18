@@ -38,7 +38,7 @@ export function AuthLayout({
         {footer ? <div className="mt-4 text-center text-sm text-muted-foreground">{footer}</div> : null}
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          All data is stored in your own database. Nothing is sent to a third party.
+          Your workspace is private to your account, and no third-party service is contacted.
         </p>
       </div>
     </div>

@@ -211,8 +211,8 @@ export function ImportWizard({ onFinished }: { onFinished?: () => void }) {
           Import a CSV
         </CardTitle>
         <CardDescription>
-          Import a bank or spreadsheet export. Nothing leaves your machine — files are parsed by the local API and
-          stored in your local database.
+          Import a bank or spreadsheet export. The file is uploaded to SpendScope and stored in your private
+          workspace — no third-party service is contacted.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
