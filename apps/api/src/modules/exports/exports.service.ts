@@ -234,6 +234,20 @@ function categoryKey(name: string, kind: string): string {
 }
 
 /**
+ * Bounds for the restore transaction.
+ *
+ * Restore runs as a single interactive transaction, so the whole document must
+ * fit inside Prisma's default 5-second window. A backup carrying refund links is
+ * written row by row — `createMany` cannot return the ids those links need — so a
+ * large document is hundreds or thousands of round trips. On a loaded database
+ * the default expires part-way through and the entire restore fails with "a
+ * query cannot be executed on an expired transaction", which the user sees as a
+ * plain 500. The timeout is raised for that shape of work, and `maxWait` with it
+ * so acquiring the connection on a busy pool is not itself the failure.
+ */
+const RESTORE_TRANSACTION_OPTIONS = { timeout: 30_000, maxWait: 15_000 } as const;
+
+/**
  * Restores a backup document into the given workspace.
  *
  * The document is already validated by the request schema. Restoring is
@@ -449,5 +463,5 @@ export async function restoreBackup(
       categoryRules: rulesCreated,
       uncategorisedByMissingCategory,
     };
-  });
+  }, RESTORE_TRANSACTION_OPTIONS);
 }
