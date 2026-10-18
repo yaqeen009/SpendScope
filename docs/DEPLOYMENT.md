@@ -433,15 +433,22 @@ guard runs first and names any problem).
 
 ### 3. Vercel
 
-Import the repository. Keep **Root Directory = repository root** (setting it to
-`apps/web` breaks the workspace install).
+Import the repository.
 
 | Setting | Value |
 | ------- | ----- |
+| Root Directory | repository root, or `apps/web` — either builds; see below |
 | Framework Preset | Vite |
 | Build Command | `npm run build --workspace @spendscope/web` |
-| Output Directory | `apps/web/dist` |
+| Output Directory | `apps/web/dist` with the repository root, `dist` with `apps/web` |
 | Install Command | (default `npm install` is fine) |
+
+**The Root Directory decides where Vercel reads `vercel.json` from, and it reads
+only that one file.** The rewrite below is what makes the deployment work, so a
+`vercel.json` outside the Root Directory is silently ignored: the build succeeds,
+the site loads, and `/api/v1/...` and every deep link answer `404`. This
+repository therefore commits the file in both places — `apps/web/vercel.json` and
+`vercel.json` — and the two must stay identical.
 
 **Variables**: leave `VITE_API_URL` **unset**. The SPA then calls `/api/v1/...`
 on its own origin, and the rewrite below proxies that path to the API. One
@@ -460,7 +467,9 @@ troubleshooting section. Treat it as a diagnostic step, not the end state.
 
 #### One origin without a custom domain
 
-`vercel.json` (repository root) makes Vercel proxy `/api/*` to the API:
+`vercel.json` — committed both at `apps/web/vercel.json` and at the repository
+root, because only the one in the project's Root Directory is read — makes Vercel
+proxy `/api/*` to the API:
 
 ```json
 {
@@ -633,9 +642,10 @@ curl -sS -D - -o /dev/null "https://<your-api>.onrender.com/api/v1/auth/config" 
   ```
 
   A `404` means no proxy is configured, so the frontend is not connected to the
-  backend at all. Add the rewrite described in "One origin without a custom
-  domain" rather than setting `VITE_API_URL`: the direct cross-site route fixes
-  the symptom on desktop and leaves mobile broken.
+  backend at all. Two causes, in order of likelihood: `vercel.json` is not in the
+  project's **Root Directory** (only that copy is read), or the deployment is
+  older than the rewrite. Check both before adding `VITE_API_URL`: the direct
+  cross-site route fixes the symptom on desktop and leaves mobile broken.
 
 `CORS_ORIGIN` accepts a comma-separated list, and a Vercel deployment URL changes
 on every deployment, so list the stable production alias as well:
