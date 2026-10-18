@@ -43,6 +43,23 @@ export function createApp(): Express {
   app.disable('x-powered-by');
   app.set('trust proxy', env.TRUST_PROXY);
 
+  /**
+   * Every response is uncacheable.
+   *
+   * The API serves one account's financial data and sets or clears the session
+   * cookie, so no shared cache may store a response: a single cached `/auth/me`
+   * or `/transactions` reply would be served to a different signed-in user.
+   * This matters as soon as a proxy or CDN sits in front of the API — the SPA
+   * reaches Render through a Vercel rewrite in the split deployment, and Vercel
+   * caches an external rewrite when the origin permits it. `no-store` is the
+   * strongest directive, so it is set before any route can respond, including
+   * 404s and error responses.
+   */
+  app.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
   app.use(
     helmet({
       contentSecurityPolicy: false,

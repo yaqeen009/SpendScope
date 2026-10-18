@@ -12,18 +12,25 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const API_TARGET = process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:4000';
 
 export default defineConfig(({ command, mode }) => {
-  // `VITE_API_URL` is inlined into the bundle, so a split deployment that
-  // forgets it ships a bundle calling `/api` on its own origin — where the
-  // static host answers with its own 404 page rather than JSON. Say so at build
-  // time, because the resulting failure is otherwise only visible in a browser.
+  // `VITE_API_URL` is inlined into the bundle. Leaving it unset is the intended
+  // configuration for the Vercel + Render split: the SPA calls `/api` on its own
+  // origin and the `vercel.json` rewrite proxies that to the API, which keeps
+  // the session cookie first-party. If no rewrite is configured, the static host
+  // answers `/api/...` with its own plain-text 404 and the frontend never
+  // reaches the backend — a failure otherwise visible only in the browser — so
+  // say at build time which of the two this is.
   const fileEnv = loadEnv(mode, here, 'VITE_');
   const apiUrl = process.env.VITE_API_URL || fileEnv.VITE_API_URL;
   if (command === 'build' && !apiUrl) {
     console.warn(
-      'VITE_API_URL is not set: the bundle will call /api on its own origin. ' +
-        'That is correct when the API is proxied on the same origin. When the API is on a ' +
-        'different domain — for example a Vercel SPA calling a Render API — set VITE_API_URL ' +
-        'and build again, or the frontend will never reach the backend.',
+      'VITE_API_URL is not set: the bundle will call /api on its own origin.\n' +
+        '  Correct when `/api/*` is proxied on the same origin — check `vercel.json`\n' +
+        '  (or the host\'s equivalent rewrites) has the rewrite. This keeps the session\n' +
+        '  cookie first-party, which mobile browsers require.\n' +
+        '  If nothing proxies /api/*, every request answers 404 and the app cannot\n' +
+        '  reach its API. Set VITE_API_URL and build again — but a direct cross-origin\n' +
+        '  call makes the cookie third-party, which Safari/iOS and Chrome on Android\n' +
+        '  block. See docs/DEPLOYMENT.md, "One origin without a custom domain".',
     );
   }
 

@@ -403,7 +403,7 @@ DATABASE_URL=<Neon pooled URL>
 DATABASE_URL_UNPOOLED=<Neon direct URL>
 CORS_ORIGIN=https://<your-app>.vercel.app
 SESSION_COOKIE_SECURE=true
-SESSION_COOKIE_SAME_SITE=none
+SESSION_COOKIE_SAME_SITE=lax
 TRUST_PROXY=1
 BOOTSTRAP_DEFAULT_WORKSPACE=false
 ALLOW_REGISTRATION=true
@@ -414,16 +414,18 @@ LOG_LEVEL=info
   it for `migrate deploy` (wired in `apps/api/prisma.config.ts`), while the
   running application always uses the pooled `DATABASE_URL`. Running migrations
   over the pooled connection fails with misleading errors.
-- `CORS_ORIGIN` must be the **exact** Vercel origin. A mismatch means the
-  browser blocks every response — this is what "registration does not work"
-  looks like from the outside.
-- `SESSION_COOKIE_SAME_SITE=none` is required with the default Vercel/Render
-  domains. It is only valid together with `Secure` (the API refuses to start
-  otherwise). It weakens CSRF defence relative to same-origin, so the origin
-  check on state-changing requests is doing the real work — leave it in place.
-- Stronger alternative: serve both from one registrable domain
-  (`app.example.com` on Vercel, `api.example.com` on Render) and use
-  `SESSION_COOKIE_SAME_SITE=lax` instead.
+- `CORS_ORIGIN` must be the **exact** Vercel origin. It is no longer used for
+  browser CORS — after the `vercel.json` rewrite every call is same-origin — but
+  the CSRF check still compares the `Origin` header against this list, so a
+  mismatch now means `403` on every sign-in, sign-up and write instead of a
+  blocked response. List the production alias, and add a preview origin before
+  using a preview deployment for anything that writes.
+- `SESSION_COOKIE_SAME_SITE=lax` is correct with the recommended single-origin
+  proxy. Use `none` **only** when the browser genuinely calls the API on another
+  registrable domain; it requires `Secure` (the API refuses to start otherwise),
+  and it weakens CSRF defence. It does not fix a blocked cookie: on
+  `vercel.app` + `onrender.com` the cookie is third-party and is discarded by the
+  browser before `SameSite` is even considered.
 - Leave `ALLOW_LOCAL_DATABASE_IN_PRODUCTION` and `ALLOW_INSECURE_COOKIES` unset.
 
 Deploy once, then confirm the service starts (the production configuration
@@ -441,21 +443,75 @@ Import the repository. Keep **Root Directory = repository root** (setting it to
 | Output Directory | `apps/web/dist` |
 | Install Command | (default `npm install` is fine) |
 
-**Variables** (build-time — inlined into the bundle, so a change needs a new
-deployment):
-
-```
-VITE_API_URL=https://<your-api>.onrender.com
-```
+**Variables**: leave `VITE_API_URL` **unset**. The SPA then calls `/api/v1/...`
+on its own origin, and the rewrite below proxies that path to the API. One
+origin, no CORS, first-party cookie.
 
 Only `VITE_*` variables are exposed to the frontend bundle. Never put
 `DATABASE_URL`, cookie names, or any other backend variable here.
 
-`VITE_API_URL` is **required** for this split. It is inlined at build time, so
-add it *before* the first build and redeploy after any change. Without it the
-bundle calls `/api/v1/...` on the Vercel origin, which serves a plain-text 404 —
-the API never sees a request, and every screen that needs data reports a
-connection problem. The build warns in the Vercel log when it is missing.
+The build prints a warning when `VITE_API_URL` is unset. That warning is
+expected here and is correct: it exists for deployments that are *not* proxied.
+
+Setting `VITE_API_URL` to the Render host instead is supported, but it makes
+every API call cross-site, and the session cookie then becomes a **third-party
+cookie** — see "Signs in, then returns to the sign-in screen" in the
+troubleshooting section. Treat it as a diagnostic step, not the end state.
+
+#### One origin without a custom domain
+
+`vercel.json` (repository root) makes Vercel proxy `/api/*` to the API:
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://<your-api>.onrender.com/api/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
+```
+
+- The first rule is the API proxy. Vercel documents external rewrites as
+  "effectively allowing Vercel to function as a reverse proxy"; it is available
+  on the Hobby plan, the proxied request timeout is **120 seconds**, and Vercel
+  forwards `x-real-ip`, `x-forwarded-for`, `x-forwarded-host` and
+  `x-forwarded-proto`, so `TRUST_PROXY=1` and rate limiting stay correct.
+- The second rule is the SPA fallback. Without it only `/` is served: `/sign-up`
+  and `/transactions` return `404` on a hard refresh, a bookmark, or a shared
+  link, even though in-app navigation appears to work.
+- Order matters: the API rule must come first. Vercel checks the filesystem
+  before applying rewrites, so `/assets/*` is still served directly.
+
+Why this is required rather than optional: `vercel.app` and `onrender.com` are
+both on the Public Suffix List, so every hostname under them is its own *site*.
+A cookie cannot be shared between `a.onrender.com` and `b.onrender.com`, and a
+`Domain=.onrender.com` cookie is rejected. The only fix is for the browser to
+see a single origin.
+
+With the proxy in place, on Render:
+
+| Variable | Value |
+| -------- | ----- |
+| `CORS_ORIGIN` | the Vercel origin — still needed for the CSRF `Origin` check, not for CORS |
+| `SESSION_COOKIE_SAME_SITE` | `lax` (one origin makes the stricter value correct) |
+| `SESSION_COOKIE_SECURE` | `true` |
+| `TRUST_PROXY` | `1` |
+
+Two caveats:
+
+- **Preview deployments.** Each preview has its own hostname, and the browser
+  sends that hostname as `Origin`. `CORS_ORIGIN` is an exact-match list, so
+  state-changing requests from a preview return `403` until that origin is added.
+  Preview deployments are fine for reviewing UI; use the production alias for
+  anything that writes.
+- **Caching.** Vercel caches an external rewrite when the origin's headers allow
+  it. The API sends `Cache-Control: no-store` on every response for this reason,
+  so a shared cache can never serve one account's data to another. Keep that
+  header; do not remove it as an optimisation.
 
 ### 4. Migrations
 
@@ -476,6 +532,17 @@ WEB=https://<your-app>.vercel.app
 curl -fsS "$API/api/v1/health" | head -c 200; echo
 curl -fsS "$API/api/v1/health/ready"; echo          # expect database: "up"
 
+# The Vercel rewrite reaches the API: JSON and 200, not a plain-text 404.
+curl -sS -D - "$WEB/api/v1/health" | grep -iE '^HTTP|^cache-control|^content-type'
+#   expect: 200, application/json, cache-control: no-store
+
+# A foreign origin is refused on a state-changing request (CSRF check survives
+# the proxy). The login route answers 403 before any credential is examined.
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' -H 'Origin: https://evil.example' \
+  -d '{"email":"a@b.test","password":"whatever12345"}' "$WEB/api/v1/auth/login"
+#   expect: 403
+
 # CORS: the Vercel origin is allowed with credentials, a foreign origin is not.
 curl -sS -D - -o /dev/null "$API/api/v1/health" \
   -H "Origin: $WEB" | grep -i '^access-control-allow-origin'   # expect the Vercel URL
@@ -484,17 +551,24 @@ curl -sS -D - -o /dev/null "$API/api/v1/health" \
 
 # The SPA is served and a deep client-side route falls back to it.
 curl -fsS -o /dev/null -w '%{http_code}\n' "$WEB/"
-curl -fsS -o /dev/null -w '%{http_code}\n' "$WEB/transactions"
+curl -fsS -o /dev/null -w '%{http_code}\n' "$WEB/transactions"   # expect 200 after the fallback rule
+
+# A 5 MB upload routes through the proxy (the CSV import allows that much).
+# Use any CSV of that size; the response must not be a proxy error.
+#   curl -sS -o /dev/null -w '%{http_code}\n' -b cookies.txt \
+#     -F 'file=@big.csv' "$WEB/api/v1/imports/preview"
 
 # Security headers on the SPA.
 curl -fsSI "$WEB/" | grep -i -E 'content-security-policy|x-content-type-options'
 ```
 
-Then in a browser: register an account (check the cookie is `Secure;
-SameSite=None; HttpOnly`), import the CSV template from the import wizard,
-confirm the rows appear on the dashboard, sign out, and confirm a protected page
-returns to sign-in. Confirm in Render's logs that request ids appear and no
-transaction descriptions, merchants, amounts or cookie values do.
+Then in a browser: register an account (check the cookie is `Secure; HttpOnly`
+and, with the proxy, `SameSite=Lax`), hard-refresh on `/transactions` to confirm
+the fallback, import the CSV template from the import wizard, confirm the rows
+appear on the dashboard, sign out, and confirm a protected page returns to
+sign-in. **Repeat the sign-in on a phone** — this is the check the proxy exists
+for. Confirm in Render's logs that request ids appear and no transaction
+descriptions, merchants, amounts or cookie values do.
 
 Finally, once your own account exists, set `ALLOW_REGISTRATION=false` on Render
 if this is a private deployment. There is no password-reset email, so keep a
@@ -549,16 +623,19 @@ curl -sS -D - -o /dev/null "https://<your-api>.onrender.com/api/v1/auth/config" 
   grep -l 'your-api-host' *.js        # empty output = the host was never inlined
   ```
 
-  If no bundle contains the API host, `VITE_API_URL` was missing when Vercel
-  built the SPA and every call went to the Vercel origin, where `/api/v1/...` is
-  not served. Vercel answers such a path with a plain-text `404`; the API client
-  now reports that as "The SpendScope API did not return JSON (HTTP 404)" rather
-  than an opaque failure. Set the variable and redeploy — the build prints a
-  warning to the Vercel log when it is missing.
+  If no bundle contains the API host, the SPA is calling its own origin. That is
+  correct **only** when `vercel.json` proxies `/api/*` to the API. Check the
+  proxy first, because a static host answers an unknown path with a plain-text
+  `404` and the API never sees a request:
 
-  On the current split deployment this is the most common cause of "the frontend
-  is not connected to the backend", and it is invisible from the API side: the
-  API never receives a request at all.
+  ```bash
+  curl -sS -o /dev/null -w '%{http_code}\n' "$WEB/api/v1/health"   # expect 200, not 404
+  ```
+
+  A `404` means no proxy is configured, so the frontend is not connected to the
+  backend at all. Add the rewrite described in "One origin without a custom
+  domain" rather than setting `VITE_API_URL`: the direct cross-site route fixes
+  the symptom on desktop and leaves mobile broken.
 
 `CORS_ORIGIN` accepts a comma-separated list, and a Vercel deployment URL changes
 on every deployment, so list the stable production alias as well:
@@ -572,6 +649,28 @@ entry — it survives deployments and makes the `SameSite` decision easier. Afte
 changing Render variables the service restarts; the production guard runs first
 and will refuse to start with the offending variable named if the value is
 malformed.
+
+#### Signs in, then returns to the sign-in screen
+
+Most visible on a phone. The sign-in request succeeds and the toast appears, but
+the app lands back on the sign-in screen, and a reload never remembers the
+session. Desktop Chrome usually works.
+
+Cause: the session cookie is being set across sites. `vercel.app` and
+`onrender.com` are both on the Public Suffix List, so a cookie set by the API
+host is a **third-party cookie** in a page served from the Vercel host. Safari
+and iOS block those outright, and Chrome on Android blocks them for most users,
+so `Set-Cookie` is ignored. `SESSION_COOKIE_SAME_SITE=none` cannot help: the
+cookie is never stored, so there is nothing to send.
+
+Confirmation, from the browser's network panel or from Render's logs: the
+`POST /auth/login` or `/auth/register` returns `200`, then the following
+`GET /auth/me` returns `401` with no `Cookie` header on the request.
+
+Fix: make the browser talk to one origin. Either the `vercel.json` rewrite
+described above, or a custom domain shared by both services. There is no cookie
+attribute that solves it, and no third-party auth library that avoids it — the
+Better Auth and Neon documentation both state the same limitation.
 
 ## Production configuration
 
@@ -785,3 +884,9 @@ the only things standing between this repository and a verified deployment:
    the public URLs with a test account, and record the result in
    `docs/PRODUCTION_TEST_REPORT.md`. Until this is done, the deployment is
    unverified, and no claim is made that SpendScope is production-ready.
+6. **On the Vercel + Render split** (the current topology): edit the `vercel.json`
+   rewrite destination to the real Render host, leave `VITE_API_URL` **unset** on
+   Vercel, and set `SESSION_COOKIE_SAME_SITE=lax` on Render. Then run the checks
+   in [section 5](#5-verify-before-opening-the-app-to-users), including the proxy,
+   deep-link and foreign-origin checks, and repeat the sign-in on a phone — that
+   is the check the proxy exists for.

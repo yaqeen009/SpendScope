@@ -52,3 +52,24 @@ describe('unknown routes', () => {
     expect(response.body.error.code).toBe('NOT_FOUND');
   });
 });
+
+describe('cacheability', () => {
+  /**
+   * The split deployment reaches the API through a Vercel rewrite, and Vercel
+   * caches an external rewrite when the origin allows it. Financial data and
+   * session-bearing responses must never be stored by a shared cache, so every
+   * response — success, rejection and 404 alike — is marked `no-store`.
+   */
+  it('marks every response uncacheable', async () => {
+    const success = await api(app).get('/api/v1/health').expect(200);
+    expect(success.headers['cache-control']).toBe('no-store');
+
+    // The test helper registers a live session, so this is the case that
+    // matters most: a session-bearing response carrying one account's data.
+    const authenticated = await api(app).get('/api/v1/auth/me').expect(200);
+    expect(authenticated.headers['cache-control']).toBe('no-store');
+
+    const missing = await api(app).get('/api/v1/does-not-exist').expect(404);
+    expect(missing.headers['cache-control']).toBe('no-store');
+  });
+});
