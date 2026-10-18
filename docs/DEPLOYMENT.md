@@ -451,6 +451,12 @@ VITE_API_URL=https://<your-api>.onrender.com
 Only `VITE_*` variables are exposed to the frontend bundle. Never put
 `DATABASE_URL`, cookie names, or any other backend variable here.
 
+`VITE_API_URL` is **required** for this split. It is inlined at build time, so
+add it *before* the first build and redeploy after any change. Without it the
+bundle calls `/api/v1/...` on the Vercel origin, which serves a plain-text 404 —
+the API never sees a request, and every screen that needs data reports a
+connection problem. The build warns in the Vercel log when it is missing.
+
 ### 4. Migrations
 
 ```bash
@@ -537,13 +543,22 @@ curl -sS -D - -o /dev/null "https://<your-api>.onrender.com/api/v1/auth/config" 
   `VITE_API_URL` is inlined at build time:
 
   ```bash
-  curl -sS "https://<your-app>.vercel.app/"
-  # then fetch the referenced /assets/*.js and grep it for the API host
+  WEB=https://<your-app>.vercel.app
+  curl -sS "$WEB/" | grep -oE '/?assets/[A-Za-z0-9._-]+\.js' | sort -u
+  # download those /assets/*.js files, then:
+  grep -l 'your-api-host' *.js        # empty output = the host was never inlined
   ```
 
-  If the bundle has no API host, `VITE_API_URL` was missing when Vercel built the
-  SPA and every call went to the Vercel origin, where `/api/v1/...` is not
-  served (Vercel returns the SPA HTML, which is not JSON). Set it and redeploy.
+  If no bundle contains the API host, `VITE_API_URL` was missing when Vercel
+  built the SPA and every call went to the Vercel origin, where `/api/v1/...` is
+  not served. Vercel answers such a path with a plain-text `404`; the API client
+  now reports that as "The SpendScope API did not return JSON (HTTP 404)" rather
+  than an opaque failure. Set the variable and redeploy — the build prints a
+  warning to the Vercel log when it is missing.
+
+  On the current split deployment this is the most common cause of "the frontend
+  is not connected to the backend", and it is invisible from the API side: the
+  API never receives a request at all.
 
 `CORS_ORIGIN` accepts a comma-separated list, and a Vercel deployment URL changes
 on every deployment, so list the stable production alias as well:

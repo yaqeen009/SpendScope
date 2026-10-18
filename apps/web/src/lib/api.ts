@@ -48,11 +48,26 @@ export function validationIssues(error: unknown): { path: string; message: strin
   });
 }
 
+/**
+ * Response envelope handling.
+ *
+ * A JSON body is the contract. When the response is not JSON the request did
+ * not reach the API at all — a static host answers an unknown path with its own
+ * 404 page or the SPA shell — so the failure is reported as such instead of an
+ * opaque `status 404` or a `TypeError` on the missing envelope.
+ */
 async function parse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
 
   const text = await response.text();
   const body: unknown = text.length > 0 ? safeJson(text) : null;
+
+  if (body === null && text.trim().length > 0) {
+    throw new ApiError(response.status, {
+      code: 'INVALID_RESPONSE',
+      message: `The SpendScope API did not return JSON (HTTP ${response.status}). The app may not be connected to its API.`,
+    });
+  }
 
   if (!response.ok) {
     const envelope = body as { error?: Partial<ApiErrorPayload> } | null;
