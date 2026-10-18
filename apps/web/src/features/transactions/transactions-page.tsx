@@ -5,7 +5,7 @@ import { Eye, MoreHorizontal, Pencil, Plus, Receipt, Trash2 } from 'lucide-react
 
 import type { TransactionDTO } from '@spendscope/shared';
 
-import { Amount, TypeBadge } from '@/components/common/amount';
+import { Amount,  TypeBadge } from '@/components/common/amount';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { Pagination } from '@/components/common/pagination';
 import { PageHeader } from '@/components/layout/page-header';
@@ -171,7 +171,7 @@ export function TransactionsPage() {
 
       {result && result.data.length > 0 ? (
         <>
-          <TableContainer>
+          <TableContainer className="relative">
             <Table>
               <TableHeader>
                 <TableRow>

@@ -78,7 +78,7 @@ export function CategoriesPage() {
       ) : null}
 
       {query.isSuccess && categories.length > 0 ? (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4">
           <CategoryGroup
             title="Expense categories"
             description="Used for expenses and refunds."
@@ -136,7 +136,7 @@ function CategoryGroup({
   onDelete: (category: CategoryDTO) => void;
 }) {
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>
@@ -147,8 +147,59 @@ function CategoryGroup({
         {categories.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Nothing here yet.</p>
         ) : (
-          <TableContainer>
-            <Table>
+          <>
+            {/*
+              Below `md` the table cannot fit: a phone gives this card 284px and a
+              category name may be 60 characters, so the Category column alone
+              needs 389px — the document was 677px wide at a 360px viewport. The
+              same rows are therefore shown as a list here, with every field
+              kept: name, "Default", description, transaction count, lifetime
+              total and both actions. Only one of the two is rendered as an
+              element, so nothing is announced twice.
+            */}
+            <ul className="-my-1 flex flex-col divide-y divide-border md:hidden">
+              {categories.map((category) => (
+                <li key={category.id} className="py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <CategoryChip name={category.name} color={category.color} className="min-w-0" />
+                        {category.isDefault ? (
+                          <Badge variant="neutral" className="shrink-0">
+                            Default
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {category.description ? (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{category.description}</p>
+                      ) : null}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="tabular text-sm font-medium">{formatMoney(category.lifetimeTotal)}</p>
+                      <p className="tabular text-xs text-muted-foreground">
+                        {pluralise(category.transactionCount, 'txn', 'txns')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(category)}>
+                      Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => onDelete(category)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <TableContainer className="hidden md:block">
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Category</TableHead>
@@ -163,14 +214,27 @@ function CategoryGroup({
                 {categories.map((category) => (
                   <TableRow key={category.id}>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <CategoryChip name={category.name} color={category.color} />
-                        {category.isDefault ? <Badge variant="neutral">Default</Badge> : null}
+                      {/*
+                        Both caps exist only to bound this column's min-content
+                        contribution, which is what sized the whole table: a
+                        60-character name in a nowrap chip plus a nowrap
+                        "Default" badge came to 389px, and the table to 763px
+                        against 284px of usable card on a phone. `table-layout:
+                        auto` grows a column to its content, so the caps never
+                        shrink a column that has room — they only stop the table
+                        from demanding space that is not there. Uncapped from
+                        `xl`, where a single-column card holds the full 762px.
+                      */}
+                      <div className="flex max-w-[10rem] min-w-0 items-center gap-2 md:max-w-[16rem] xl:max-w-none">
+                        <CategoryChip name={category.name} color={category.color} className="min-w-0" />
+                        {category.isDefault ? (
+                          <Badge variant="neutral" className="shrink-0">
+                            Default
+                          </Badge>
+                        ) : null}
                       </div>
                       {category.description ? (
-                        <p className="mt-0.5 max-w-[16rem] truncate text-xs text-muted-foreground">
-                          {category.description}
-                        </p>
+                        <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{category.description}</p>
                       ) : null}
                     </TableCell>
                     <TableCell className="tabular text-right text-muted-foreground">
@@ -198,7 +262,8 @@ function CategoryGroup({
                 ))}
               </TableBody>
             </Table>
-          </TableContainer>
+            </TableContainer>
+          </>
         )}
       </CardContent>
     </Card>

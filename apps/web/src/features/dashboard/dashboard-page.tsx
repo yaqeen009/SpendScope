@@ -194,16 +194,7 @@ export function DashboardPage() {
                   </p>
                 ) : (
                   <>
-                    {/*
-                      A phone gives this card ~286px. The table below needs 439px
-                      — four columns, none of them droppable — so it cannot fit,
-                      and squeezing it with `table-layout: fixed` overflows the
-                      cells instead. Below `sm` the same rows are therefore
-                      shown as a compact two-line list; from `sm` up, where the
-                      card is wide enough for the table, the table is used.
-                      Exactly one of the two is rendered as an element, so the
-                      data is never announced twice.
-                    */}
+                    
                     <ul className="-my-1 flex flex-col divide-y divide-border sm:hidden">
                       {dashboard.recentTransactions.map((row) => (
                         <li key={row.id} className="flex items-start justify-between gap-3 py-3">

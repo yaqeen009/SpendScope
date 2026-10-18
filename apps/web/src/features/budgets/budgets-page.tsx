@@ -45,7 +45,7 @@ export function BudgetsPage() {
   const budgets = budgetsQuery.data ?? [];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 ">
       <PageHeader
         title="Budgets"
         description="Set a total monthly expense budget and per-category limits, then track actual spending against them."
@@ -87,8 +87,8 @@ export function BudgetsPage() {
       ) : null}
 
       {budgetsQuery.isSuccess ? (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Card>
+        <div className="grid gap-4 xl:grid-cols-2 grid-cols-1">
+          <Card className="">
             <CardHeader>
               <CardTitle>Progress for {formatMonth(month)}</CardTitle>
               <CardDescription>Spending against each budget for this month.</CardDescription>
@@ -130,7 +130,7 @@ export function BudgetsPage() {
                   }
                 />
               ) : (
-                <TableContainer>
+                <TableContainer className="relative">
                   <Table>
                     <TableHeader>
                       <TableRow>
